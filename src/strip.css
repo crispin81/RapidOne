@@ -1,0 +1,227 @@
+/* The filmstrip's filter bar and its All | Rated | Unrated switch. Not in
+   App.css: that is kept out of the embedded modules (scopeCss.ts), and this
+   bar also sits in Retouch's film strip. Every rule is under .strip-filter,
+   so nothing else in the modules is touched. */
+
+/* Filmstrip filter: exact stars and picked, at the top of the strip. */
+.strip-filter {
+  position: sticky;
+  /* Flush with the strip's edges (it has 8px padding). */
+  top: -8px;
+  margin: -8px -8px 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 4px 4px 5px;
+  border-bottom: 1px solid rgba(62, 230, 255, 0.25);
+  background: rgba(8, 8, 8, 0.94);
+}
+
+.strip-filter button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 2px;
+  border: 0;
+  background: none;
+  color: #5c6a70;
+  cursor: pointer;
+}
+
+.strip-filter button:hover {
+  color: rgb(255, 122, 26);
+}
+
+.strip-filter__star--on,
+.strip-filter__pick--on {
+  color: #3ee6ff !important;
+}
+
+.strip-filter__pick {
+  margin-left: 4px;
+}
+
+.strip-filter__count {
+  margin-left: auto;
+  color: #8a8b96;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.strip-filter__empty {
+  margin: 8px 4px;
+  color: #8a8b96;
+  font-size: 11px;
+}
+
+.strip-filter .strip-filter__op {
+  min-width: 14px;
+  margin-right: 2px;
+  color: #3ee6ff;
+  font-family: "Exo 2", system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+
+/* All | Rated | Unrated (after the Cull | Edit | Retouch switch): hexagonal
+   ends, a lit hexagonal slider gliding to the chosen one. */
+.strip-filter .viewswitch {
+  --notch: 9px;
+  position: relative;
+  display: grid;
+  /* Room at the hexagon ends so Rated / Unrated aren't squashed (as wide as the filmstrip allows). */
+  grid-template-columns: repeat(3, 52px);
+  flex-shrink: 0;
+  padding: 2px 5px;
+  clip-path: polygon(var(--notch) 0, calc(100% - var(--notch)) 0, 100% 50%, calc(100% - var(--notch)) 100%, var(--notch) 100%, 0 50%);
+  background: linear-gradient(180deg, #1a4552, #0e2a33);
+}
+
+.strip-filter .viewswitch::before {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  clip-path: polygon(calc(var(--notch) - 0.5px) 0, calc(100% - var(--notch) + 0.5px) 0, 100% 50%, calc(100% - var(--notch) + 0.5px) 100%, calc(var(--notch) - 0.5px) 100%, 0 50%);
+  background: linear-gradient(180deg, #151515, #070707);
+}
+
+.strip-filter .viewswitch__slider {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 5px;
+  width: calc((100% - 10px) / 3);
+  clip-path: polygon(7px 0, calc(100% - 7px) 0, 100% 50%, calc(100% - 7px) 100%, 7px 100%, 0 50%);
+  background: linear-gradient(180deg, #5ff0ff, #1fb8d0);
+  box-shadow: 0 0 12px rgba(62, 230, 255, 0.6);
+  transition: transform 0.28s cubic-bezier(0.3, 0.8, 0.3, 1);
+}
+
+.strip-filter .viewswitch__option {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  padding: 4px 0;
+  border: none !important;
+  background: none !important;
+  box-shadow: none !important;
+  color: #8a8b96;
+  cursor: pointer;
+  font-family: "Exo 2", system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition: color 0.2s ease;
+}
+
+.strip-filter .viewswitch__option:hover:not(.viewswitch__option--on):not(:disabled) {
+  color: rgb(255, 150, 70) !important;
+}
+
+.strip-filter .viewswitch__option:disabled {
+  color: #3a3b45;
+  cursor: default;
+}
+
+.strip-filter .viewswitch__option--on {
+  color: #050505 !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+.strip-filter .viewswitch__slider {
+    transition: none;
+  }
+}
+
+/* Edit: the switch at the top of the filmstrip, above the filter. */
+.strip-filter {
+  flex-wrap: wrap;
+}
+
+.strip-filter .viewswitch {
+  margin: 0 auto 5px;
+}
+
+.strip-filter .viewswitch__option {
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
+/* Edit's filter bar (and All / Rated / Unrated) at the top of Retouch's film
+   strip: inside RapidRetouch's styles, so its button look is undone here. */
+.rapidretouch .strip-filter {
+  position: static;
+  margin: 0 -8px 2px;
+  padding: 0 4px 5px;
+  border-bottom: none;
+  background: none;
+}
+
+.rapidretouch .strip-filter button {
+  gap: 0;
+  padding: 2px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: #5c6a70;
+  font-size: 12px;
+}
+
+.rapidretouch .strip-filter button:hover:not(:disabled) {
+  border-color: transparent;
+  color: rgb(255, 122, 26);
+  box-shadow: none;
+}
+
+.rapidretouch .strip-filter .strip-filter__op {
+  color: #3ee6ff;
+}
+
+.rapidretouch .strip-filter .viewswitch__option {
+  padding: 4px 0;
+  color: #8a8b96;
+  font-size: 10px;
+}
+
+.rapidretouch .strip-filter .viewswitch__option:hover:not(.viewswitch__option--on):not(:disabled) {
+  color: rgb(255, 150, 70) !important;
+}
+
+/* Rendered with its edit (opens at once): the Teach / apply look sparkle, Tron orange in a black
+   circle, top right of the thumbnail. */
+.thumb__badges {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  pointer-events: none;
+}
+.thumb__ready {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #000;
+  color: rgb(255, 122, 26);
+  /* Hoverable for its name (a click still reaches the thumbnail). */
+  pointer-events: auto;
+}
+
+/* The film strip's scrollbar handle in the accent cyan (elsewhere it's the dim teal, cyan on hover). */
+.filmstrip {
+  scrollbar-color: #3ee6ff transparent;
+}
+.filmstrip::-webkit-scrollbar-thumb {
+  background-color: #3ee6ff;
+}
+/* "Edited" (any edit at all) in the accent cyan, apart from the orange render icons under it. */
+.thumb__ready--edited {
+  color: #3ee6ff;
+}

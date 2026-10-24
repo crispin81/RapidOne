@@ -1,0 +1,78 @@
+[package]
+name = "rapidone"
+version = "1.0.0"
+description = "RapidOne RAW editor"
+authors = ["Chris Cork Photography"]
+edition = "2021"
+
+[lib]
+name = "rapidone_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+# Opens web links in the default browser (the coffee line, Retouch's About links). MIT / Apache-2.0.
+tauri-plugin-opener = "2"
+# Reads the Lensfun lens database (lensfun.rs). MIT / Apache-2.0.
+roxmltree = "0.20"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Free memory, for how many photos Export does at once (already in the tree via the Cull module; MIT).
+sysinfo = "0.32"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff"] }
+kamadak-exif = "0.5"
+rawler = "0.8.0"
+chrono = "0.4.45"
+base64 = "0.23.1"
+rayon = "1"
+# zlib, for the compressed tables inside look profiles (.xmp).
+flate2 = "1"
+# 16-bit TIFFs: the hand-off to RapidRetouch (handoff.rs) and examples/chartkit.rs. Already in the build via `image`. MIT.
+tiff = "0.11"
+# ONNX Runtime, for the subject mask (BiRefNet): MIT OR Apache-2.0; ONNX Runtime itself is MIT.
+ort = { version = "=2.0.0-rc.14", default-features = false, features = ["std", "download-binaries", "tls-native", "copy-dylibs", "api-31"] }
+
+# The Cull and Retouch screens: Chris's RapidCulling / RapidRetouch as Tauri plugins (AGPL-3.0, his own).
+tauri-plugin-rapidculling = { git = "https://github.com/crispin81/RapidCulling-module", branch = "module" }
+tauri-plugin-rapidretouch = { git = "https://github.com/crispin81/RapidRetouch-module", branch = "module" }
+
+
+# Windows: ONNX Runtime with DirectML, so AI noise reduction runs on any DirectX 12 GPU
+# (it falls back to the CPU without one). Same ort, one more feature.
+[target.'cfg(windows)'.dependencies]
+ort = { version = "=2.0.0-rc.14", default-features = false, features = ["directml"] }
+
+# Linux: ONNX Runtime's WebGPU build (Vulkan underneath), so AI noise reduction runs on NVIDIA,
+# AMD or Intel graphics with no CUDA install (it falls back to the CPU without one).
+[target.'cfg(target_os = "linux")'.dependencies]
+ort = { version = "=2.0.0-rc.14", default-features = false, features = ["webgpu"] }
+# malloc_trim: freed memory back to the system (memtrim.rs). MIT / Apache-2.0.
+libc = "0.2"
+
+# Apple Silicon Macs: ONNX Runtime with CoreML, so AI noise reduction runs on the Mac's graphics
+# (ONNX Runtime ships CoreML builds for Apple Silicon only; Intel Macs stay on the CPU).
+[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
+ort = { version = "=2.0.0-rc.14", default-features = false, features = ["coreml"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
+
+# `tauri dev` builds in debug mode, where unoptimised Rust is far too slow for
+# image work (decoding a 100MP RAW). Optimise dependencies and our own code
+# fully, keeping debug info. Our own code was at 1, but the render engine
+# (pipeline.rs) was then too slow for live slider drags on the Zenbook
+# (Core Ultra 9 185H): previews only showed on release. Slower rebuilds after
+# editing Rust are the price.
+[profile.dev]
+opt-level = 3
+
+[profile.dev.package."*"]
+opt-level = 3

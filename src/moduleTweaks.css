@@ -1,0 +1,18 @@
+/*
+ * RapidOne's few rules for elements inside the embedded modules (RapidRetouch's markup in the loupe
+ * and its Export dialog). Kept apart from App.css, which scopeCss.ts fences off from the modules.
+ */
+
+/* The loupe's Before | After (Retouch's buttons, blurred backdrop, placed from the bottom): WebKitGTK
+   put it in the wrong place for a frame when the loupe's layers changed; a layer of its own for good. */
+.viewer .rapidretouch .before-after {
+  will-change: transform;
+}
+
+/* No shimmer on the export dialog's progress bars (Chris, 24 Oct). Its endless sweep redrew the dialog
+   ~60 times a second for a whole export, and twice WebKitGTK's drawing locked up partway through an
+   unattended export. (Later: take it out in the RapidRetouch module itself.) */
+.rapidretouch .export__row--exporting .export__bar > div::after {
+  animation: none !important;
+  display: none !important;
+}

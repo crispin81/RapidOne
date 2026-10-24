@@ -1,0 +1,20 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+*.local.json
+.env
+.DS_Store
+Thumbs.db
+
+# Downloaded AI models (BiRefNet etc.): fetched with `npm run fetch-models`, never committed.
+# Except our own noise model (12 MB, distilled from SCUNet, Apache-2.0), which lives only here.
+models/*
+!models/denoise-student.onnx
+__pycache__/
+
+# Release builds: uv and RapidRetouch's engine source, staged by scripts/prepare-release.sh.
+src-tauri/binaries/
+src-tauri/retouch-engine/
+src-tauri/linux-lib/
+release/

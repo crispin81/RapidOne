@@ -1,0 +1,29 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "externalBin": [
+      "binaries/uv"
+    ],
+    "resources": {
+      "../models/birefnet-lite.onnx": "models/birefnet-lite.onnx",
+      "../models/denoise-student.onnx": "models/denoise-student.onnx",
+      "../models/grounding-dino-tiny-int8.onnx": "models/grounding-dino-tiny-int8.onnx",
+      "../models/grounding-dino-tokenizer.json": "models/grounding-dino-tokenizer.json",
+      "../models/lama_fp32.onnx": "models/lama_fp32.onnx",
+      "../models/mobile_sam_image_encoder.onnx": "models/mobile_sam_image_encoder.onnx",
+      "../models/sam_mask_decoder_multi.onnx": "models/sam_mask_decoder_multi.onnx",
+      "../models/MODELS-LICENCES.txt": "models/MODELS-LICENCES.txt",
+      "retouch-engine/pyproject.toml": "engine/pyproject.toml",
+      "retouch-engine/uv.lock": "engine/uv.lock",
+      "retouch-engine/README.md": "engine/README.md",
+      "retouch-engine/src/": "engine/src/"
+    },
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/lib/RapidOne/libwebgpu_dawn.so": "linux-lib/libwebgpu_dawn.so"
+        }
+      }
+    }
+  }
+}

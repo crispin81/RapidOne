@@ -1,0 +1,6 @@
+{
+  "build": {
+    "devUrl": null,
+    "beforeDevCommand": { "script": "npx vite build --watch --emptyOutDir false", "wait": false }
+  }
+}

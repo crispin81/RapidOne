@@ -1,0 +1,4090 @@
+/* Exo 2 is the app's one font (bundled via @fontsource in main.tsx, not fetched at runtime). */
+
+* {
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: #1a4552 transparent;
+}
+
+/* Chromium (Windows' WebView2) and WebKit (Linux/macOS) both support this
+   legacy pseudo-element API, so this alone covers every platform Tauri
+   targets - a themed scrollbar instead of each OS's own default chrome. */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: #1a4552;
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: #3ee6ff;
+}
+
+/* A dark app: WebKitGTK draws a dropdown's open list (and other native parts) dark only when told. */
+:root {
+  color-scheme: dark;
+}
+
+button, input, select {
+  font-family: inherit;
+}
+
+button:focus-visible, input:focus-visible, select:focus-visible {
+  outline: 2px solid #3ee6ff;
+  outline-offset: 1px;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #080808;
+  color: #e6e6ea;
+  font-family: "Exo 2", system-ui, sans-serif;
+  font-size: 13px;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+
+
+/* Buttons and check boxes: same as RapidRetouch. */
+button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid #14343f;
+  border-radius: 6px;
+  background: #0f0f0f;
+  color: #e6e6ea;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: #3ee6ff;
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+button.active,
+button.primary {
+  background: #3ee6ff;
+  border-color: #3ee6ff;
+  color: #080808;
+}
+
+/* Custom-drawn rather than the OS check box, which looks different on
+   every platform Tauri targets. */
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #b7b8c2;
+  cursor: pointer;
+}
+
+.check input {
+  appearance: none;
+  -webkit-appearance: none;
+  display: grid;
+  place-content: center;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  border: 1px solid #14343f;
+  border-radius: 3px;
+  background: #0f0f0f;
+  cursor: pointer;
+}
+
+.check input::after {
+  content: "";
+  width: 8px;
+  height: 4px;
+  margin-top: -2px;
+  border-left: 2px solid #080808;
+  border-bottom: 2px solid #080808;
+  transform: rotate(-45deg) scale(0);
+}
+
+.check input:checked {
+  background: #3ee6ff;
+  border-color: #3ee6ff;
+}
+
+.check input:checked::after {
+  transform: rotate(-45deg) scale(1);
+}
+
+.check:hover input {
+  border-color: #3ee6ff;
+}
+.titlebar {
+  font-family: "Exo 2", system-ui, sans-serif;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 28px;
+  flex-shrink: 0;
+  background: #0b0b0b;
+  border-bottom: 1px solid #12303a;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+  padding: 8px 14px;
+  background: #000000;
+  border-bottom: 1px solid rgb(255, 122, 26);
+  box-shadow: inset 0 1px 0 rgb(255, 122, 26);
+  color: rgb(255, 122, 26);
+  font-weight: 600;
+  font-family: "Exo 2", system-ui, sans-serif;
+  font-size: 12px;
+  text-shadow: none;
+}
+
+.error-banner button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: #ff4d4d;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.error-banner button:hover {
+  color: #ff8080;
+}
+
+/* Bars, Tron style (Chris, 18 Oct): black with a Tron-orange stroke, cyan text; a problem in orange, bold. */
+.notice-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+  padding: 8px 14px;
+  background: #000000;
+  border-bottom: 1px solid rgb(255, 122, 26);
+  box-shadow: inset 0 1px 0 rgb(255, 122, 26);
+  color: #3ee6ff;
+  font-family: "Exo 2", system-ui, sans-serif;
+  font-size: 12px;
+  text-shadow: none;
+}
+
+.notice-banner button {
+  background: none;
+  border: none;
+  color: #ff4d4d;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.notice-banner button:hover {
+  color: #ff8080;
+}
+
+/* A notice's own action (Undo after a delete): cyan, beside the message; orange on hover. */
+.notice-banner .notice-banner__action {
+  margin-left: auto;
+  padding: 2px 10px;
+  border: 1px solid #3ee6ff;
+  border-radius: 4px;
+  color: #3ee6ff;
+  font-family: inherit;
+  font-size: 12px;
+}
+.notice-banner .notice-banner__action:hover {
+  border-color: rgb(255, 122, 26);
+  color: rgb(255, 122, 26);
+}
+
+.titlebar__title {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  /* Same face and glow as the start screen's terminal heading. */
+  font-family: "Cascadia Mono", Consolas, "DejaVu Sans Mono", "Courier New", monospace;
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.12em;
+  white-space: pre;
+  color: #3ee6ff;
+  text-shadow: 0 0 6px rgba(62, 230, 255, 0.6);
+  pointer-events: none;
+}
+
+.titlebar__controls {
+  display: flex;
+  height: 100%;
+}
+
+.titlebar__controls button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 100%;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 0;
+  color: #b7b8c2;
+  cursor: pointer;
+}
+
+.titlebar__controls button:hover {
+  background: #12303a;
+}
+
+.titlebar__close:hover {
+  background: #e81123 !important;
+  color: white;
+}
+
+/* Filmstrip thumbnails (same look as RapidCulling) */
+.thumb {
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+  width: 142px;
+  height: 96px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #101010;
+  cursor: pointer;
+}
+
+.thumb--loading {
+  cursor: default;
+}
+
+.thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.thumb--selected {
+  border-color: #3ee6ff;
+}
+
+.thumb--rejected img {
+  opacity: 0.35;
+}
+
+.thumb__overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.75), transparent);
+  font-size: 12px;
+}
+
+/* The rating on the filmstrip: cyan stars, as in Cull. */
+.thumb__stars {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  color: #3ee6ff;
+}
+
+.thumb__pick {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: #000;
+  color: #3ee6ff;
+  flex-shrink: 0;
+}
+
+.thumb__reject {
+  color: #ff5252;
+  flex-shrink: 0;
+}
+
+
+/* ---- RapidOne layout ---------------------------------------------------- */
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Top bar: working folder, presets, lens profiles, AI */
+.topbar {
+  font-family: "Exo 2", system-ui, sans-serif;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 8px 12px;
+  background: #0b0b0b;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.topbar__folder {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: #8a8b96;
+}
+
+.topbar__spacer {
+  flex: 1;
+}
+
+/* Profile choice, first in the top bar. */
+.topbar__profile {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px; /* a little space after Working folder */
+  margin-right: 4px;
+  font-size: 12px;
+  color: #8a8b96;
+}
+
+.topbar__profile select {
+  /* A steady width: a select is as wide as its longest option, and that changes with the photo
+     (its own profiles get "(not for this camera)" on another camera's photo). A long name is cut. */
+  width: 150px;
+  text-overflow: ellipsis;
+  padding: 4px 8px;
+  border: 1px solid #1a4552;
+  border-radius: 4px;
+  background: #262626;
+  color: #e8e8ec;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.topbar__profile select:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* A top-bar button with a dropdown under it (Presets). */
+.topbar__menu {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.topbar__dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 230px;
+  padding: 4px;
+  border: 1px solid #14343f;
+  border-radius: 6px;
+  background: #0b0b0b;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+
+.topbar__dropdown button {
+  justify-content: flex-start;
+  border: 1px solid transparent;
+  background: none;
+  white-space: nowrap;
+}
+
+
+/* Presets menu (after RapidRetouch's): apply-to toggle, the presets sorted
+   by name with delete, save the current settings, import Lightroom presets. */
+.presets__menu {
+  gap: 6px;
+  width: 280px;
+  padding: 8px;
+}
+
+.presets__scope {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #8a8b96;
+}
+
+.presets__scope span {
+  margin-right: 4px;
+}
+
+.presets__scope button {
+  padding: 3px 8px;
+  font-size: 11px;
+  border: 1px solid #14343f !important;
+}
+
+.presets__scope button.is-on {
+  color: #3ee6ff;
+  border-color: #3ee6ff !important;
+  box-shadow: 0 0 6px rgba(62, 230, 255, 0.35);
+}
+
+.presets__empty {
+  margin: 2px 2px 4px;
+  font-size: 11px;
+  color: #8a8b96;
+  white-space: normal;
+}
+
+.presets__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.presets__list li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.presets__apply {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.presets__delete {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  color: #6c6d78;
+}
+
+.presets__delete--confirm {
+  color: #ff5252;
+  font-size: 11px;
+}
+
+.presets__save {
+  display: flex;
+  gap: 4px;
+  padding-top: 6px;
+  border-top: 1px solid #14343f;
+}
+
+.presets__save input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid #1a4552;
+  border-radius: 4px;
+  background: #080808;
+  color: #e8e8ec;
+  font-size: 12px;
+  outline: none;
+}
+
+.presets__save input:focus {
+  border-color: #3ee6ff;
+}
+
+.presets__import {
+  border-top: 1px solid #14343f !important;
+  border-radius: 0 !important;
+  padding-top: 8px !important;
+  color: #3ee6ff;
+}
+
+/* Crop: the frame covers the viewer while cropping; the bar floats at the top. */
+.crop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  width: 100%;
+  height: 100%;
+}
+
+.cropbar {
+  position: absolute;
+  left: 50%;
+  top: 12px;
+  z-index: 4;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid rgba(62, 230, 255, 0.55);
+  border-radius: 6px;
+  background: rgba(8, 8, 8, 0.92);
+  box-shadow: 0 0 12px rgba(62, 230, 255, 0.2), 0 6px 18px rgba(0, 0, 0, 0.5);
+  font-family: "Exo 2", system-ui, sans-serif;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.cropbar__grip {
+  display: flex;
+  color: #6c6d78;
+  cursor: grab;
+}
+
+.cropbar__grip:active {
+  cursor: grabbing;
+}
+
+.cropbar__what {
+  color: #3ee6ff;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 11px;
+}
+
+.cropbar__straighten {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #b7b8c2;
+}
+
+.cropbar__straighten input {
+  width: 120px;
+  accent-color: #3ee6ff;
+}
+
+.cropbar__angle {
+  min-width: 42px;
+  color: #e8e8ec;
+  font-variant-numeric: tabular-nums;
+}
+
+.cropbar__aspects {
+  display: flex;
+  gap: 2px;
+}
+
+.cropbar__aspects button {
+  padding: 3px 7px;
+  font-size: 11px;
+}
+
+.cropbar__aspects button.is-on,
+.topbar button.is-on {
+  color: #3ee6ff;
+  border-color: #3ee6ff;
+  box-shadow: 0 0 6px rgba(62, 230, 255, 0.35);
+}
+
+.cropbar__done {
+  color: #080808 !important;
+  background: #3ee6ff !important;
+  border-color: #3ee6ff !important;
+}
+
+/* Workspace: viewer + bottom panel on the left, filmstrip on the right */
+.workspace {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* The filmstrip's column: it stops above the docked panel (App sets the padding). */
+.filmstrip-wrap {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.filmstrip-wrap > .filmstrip {
+  flex: 1;
+  min-height: 0;
+}
+
+.workspace__main {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+/* The slider panel docks over the bottom of the viewer, so the corridor runs
+   on under its see-through bar. */
+.panel-dock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  /* Its own drawing layer for good. Without it WebKitGTK rebuilt the panel's layer when the loupe's
+     layers changed (a zoom landing) and drew it for a frame at the window's top left: the W/B group
+     over a dimmed top bar (caught on a recording, 24 Oct). Nothing inside is position: fixed. */
+  will-change: transform;
+}
+
+
+.viewer {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  /* Neutral grey (equal R, G, B), no tint: the surround next to the photo
+     mustn't sway colour judgement. The rest of the interface keeps its
+     blue-black. */
+  background: #101010;
+}
+
+
+
+
+.viewer__main {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-width: 0;
+  padding: 12px;
+}
+
+/* The editor's corridor: the home screen's grid behind the photo, in faint
+   neutral white so it doesn't sway colour judgement; a quick rush outward when
+   a photo arrives. */
+.viewer__corridor {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  fill: none;
+  /* Neutral D65 white (sRGB white), so the surround stays neutral for colour work. */
+  stroke: rgba(255, 255, 255, 0.17);
+  stroke-width: 1;
+  pointer-events: none;
+  animation: corridor-rush 0.45s ease-out;
+}
+
+/* The photo's place: the corridor's closest frame. It floats: a slow, slight
+   hover after flying in, and a neutral D65 bias-light halo behind (sRGB white
+   is D65; dim, no tint), which gives the eye a true neutral beside the
+   picture for judging colour. */
+.viewer__frame {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* No slow hover (photo-float) any more, 23 Oct: a photo that never stays still keeps WebKitGTK
+     re-drawing it, and the loupe glitched while it moved (and on the CPU it cost a whole core). */
+  animation: photo-fly-in 0.15s ease-out;
+}
+
+/* The halo is the frame's (it has the photo's shape and stays put), not the
+   picture's: renders crossfading over each other would make it flicker. */
+.viewer__frame::before {
+  content: "";
+  position: absolute;
+  /* Round the crop while Masks, Patch or Erase show the photo clipped to it (Viewer sets these). */
+  inset: var(--halo-t, 0) var(--halo-r, 0) var(--halo-b, 0) var(--halo-l, 0);
+  pointer-events: none;
+  box-shadow:
+    0 0 50px 8px rgba(255, 255, 255, 0.11),
+    0 0 120px 30px rgba(255, 255, 255, 0.05);
+  transition: opacity 0.3s ease;
+}
+
+/* Full frame (F): the photo grows out to fill the viewer; the corridor,
+   halo and floor shadow fade away. */
+/* Only while Full frame or D65 Glow changes (Viewer's `gliding`): a new shape is there at once. */
+.viewer__frame--glide {
+  transition: left 0.3s ease, top 0.3s ease, right 0.3s ease, bottom 0.3s ease;
+}
+
+.viewer__frame--full::before,
+.viewer__frame--plain::before {
+  opacity: 0;
+}
+
+.viewer__corridor {
+  transition: opacity 0.3s ease;
+}
+
+.viewer__corridor--hidden {
+  opacity: 0;
+}
+
+
+
+/* A new photo fades in where it sits. (It flew in from the corridor's far end, scale 0.18 to 1,
+   until 23 Oct: WebKitGTK showed that in three or four jumps while the photo loaded.) */
+@keyframes photo-fly-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes corridor-rush {
+  from {
+    transform: scale(0.82);
+    stroke: rgba(255, 255, 255, 0.28);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .viewer__frame,
+  .viewer__corridor {
+    animation: none;
+  }
+}
+
+.viewer__img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.viewer__img {
+  transition: filter 0.35s ease, opacity 0.35s ease;
+}
+
+/* Stand-in while the engine renders the edit: shown as it is. (It was muted and soft, 23 Oct:
+   the render then brightened and sharpened visibly as it landed, which read as a flicker.) */
+.viewer__img--pending {
+  filter: none;
+}
+
+.viewer__img--loading {
+  width: 100%;
+  height: 100%;
+  filter: blur(2px);
+  opacity: 0.6;
+}
+
+.viewer__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  color: #6c6d78;
+}
+
+/* The empty viewer's backdrop: a grid corridor leading to a photo in the
+   middle half, behind the terminal prompt, shown like an old monitor with
+   scanlines. */
+.scene {
+  position: absolute;
+  inset: 0;
+  /* Its own layer, so the scanlines can never stack above the prompt. */
+  z-index: 0;
+  pointer-events: none;
+  animation: scene-in 1.2s ease-out;
+}
+
+.scene__grid {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  fill: none;
+  /* Neutral D65 white with light fall-off, as the editor's corridor. */
+  stroke: rgba(255, 255, 255, 0.2);
+  stroke-width: 1;
+}
+
+.scene__picture {
+  position: absolute;
+  left: 25%;
+  top: 25%;
+  width: 50%;
+  height: 50%;
+  overflow: hidden;
+  background: #080808;
+  /* The D65 halo, as round the editor's photo. */
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 0 50px 8px rgba(255, 255, 255, 0.11), 0 0 120px 30px rgba(255, 255, 255, 0.05);
+}
+
+.scene__picture img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 55% 60%;
+  filter: brightness(0.8) saturate(1.1);
+}
+
+/* Scanlines: a dark line every 3px, and a soft vignette at the edges. */
+.scene__picture::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background:
+    /* Soft lines (each fades in and out, as a CRT's), so wherever one falls between the screen's
+       pixels it looks the same: hard one-pixel lines, at a fractional screen scale or window size,
+       came out sharp, sharp, then smeared over two rows (24 Oct). */
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      rgba(0, 0, 0, 0.3) 1.5px,
+      transparent 3px,
+      transparent 4px
+    ),
+    radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.55) 100%);
+}
+
+/* A faint bright band that rolls slowly down the picture, as on an old CRT. */
+.scene__picture::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -30%;
+  height: 30%;
+  z-index: 2;
+  background: linear-gradient(to bottom, transparent, rgba(180, 240, 255, 0.07), transparent);
+  animation: scan-roll 7s linear infinite;
+}
+
+/* The home screen's second choice: a plain terminal line, orange on hover. */
+.terminal__alt {
+  all: unset;
+  cursor: pointer;
+  align-self: flex-start;
+  white-space: pre;
+  margin-top: 2px;
+  padding: 2px 11px;
+  color: rgba(190, 246, 255, 0.7);
+}
+
+.terminal__alt:hover,
+.terminal__alt:focus-visible {
+  color: rgb(255, 150, 70);
+  text-shadow: 0 0 8px rgba(255, 122, 26, 0.9);
+}
+
+/* The prompt sits above the backdrop. */
+.viewer__empty .terminal {
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes scene-in {
+  from {
+    opacity: 0;
+    transform: scale(1.06);
+  }
+}
+
+@keyframes scan-roll {
+  to {
+    transform: translateY(433%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scene,
+  .scene__picture::after {
+    animation: none;
+  }
+}
+
+.viewer__meta {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 6px;
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #8a8b96;
+  pointer-events: none;
+}
+
+/* Filmstrip: vertical column on the right */
+.filmstrip {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+  /* A fixed width, the vertical scrollbar's room kept, so nothing ever needs a sideways scrollbar. */
+  width: 172px;
+  min-width: 172px;
+  max-width: 172px;
+  box-sizing: border-box;
+  padding: 8px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+  /* 98% black (2% grey), plain: no gloss. */
+  background: #050505;
+  background-image: none;
+  border-left: 1px solid #12303a;
+}
+
+.filmstrip .thumb {
+  width: 100%;
+  height: 100px;
+}
+
+/* Bottom panel: kept short so the image gets the space (brief section 3). */
+.panel {
+  display: flex;
+  justify-content: flex-start;
+  /* As little as possible between groups, so the bar fits as much as it can. */
+  column-gap: 3px;
+  flex-shrink: 0;
+  /* min-height, not height, so a scrollbar adds to the panel rather than
+     cutting into the sliders. */
+  min-height: 222px;
+  padding: 4px 8px 6px;
+  /* 97% black (3% grey), under the gloss, slightly see-through: the
+     corridor's lines show faintly behind the bar (not the groups). */
+  background-color: rgba(8, 8, 8, 0.7);
+  border-top: 1px solid rgba(62, 230, 255, 0.35);
+  box-shadow: 0 -1px 10px rgba(62, 230, 255, 0.12);
+  /* A sideways scrollbar appears only when the window is too narrow. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Each group sits in a thin neon frame. Holding a slider's key "powers on"
+   its group: a brighter frame with a white-hot core and halo, and a fine light
+   grid sweeping in; the other groups dim. The neon colour is one variable:
+   Tron: Legacy-style icy cyan now; the house gold (#3ee6ff, 255 204 51) is the
+   other option (the brief keeps RapidOne matched to RapidCulling/RapidRetouch). */
+:root {
+  --neon: 62, 230, 255;
+  /* Every round marker in the interface is a flat-topped hexagon. Rings are
+     stacked hexagons (clip-path also clips borders and shadows). */
+  --hex: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
+  /* A regular hexagon in a square box (the colour wheel): corners left and right. */
+  --hex-wheel: polygon(25% 6.7%, 75% 6.7%, 100% 50%, 75% 93.3%, 25% 93.3%, 0 50%);
+}
+
+.panel__group {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 6px 0;
+  border: 1px solid rgba(var(--neon), 0.28);
+  border-radius: 6px;
+  /* Solid, so the corridor shows only through the bar between the groups. */
+  background-color: #0b0b0b;
+  box-shadow: 0 0 6px rgba(var(--neon), 0.1), inset 0 0 10px rgba(var(--neon), 0.04);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
+}
+
+/* Centre the groups with auto margins rather than justify-content, which would
+   push the leftmost groups out of reach once the panel scrolls. */
+/* Groups keep their width; the panel scrolls instead of squashing them. */
+.panel > * {
+  flex-shrink: 0;
+}
+
+.panel > :first-child {
+  margin-left: auto;
+}
+
+.panel > :last-child {
+  margin-right: auto;
+}
+
+/* Darkened rather than faded, so the group stays solid: a black veil at half strength (what
+   brightness(0.5) gave). Not a filter: WebKitGTK made and dropped a drawing layer per group each
+   time a group lit up, and a fresh layer can be drawn in the wrong place for a frame. The veil
+   is its own layer from the start (will-change), so lighting a group only changes its opacity. */
+.panel__group {
+  position: relative;
+  /* Each group its own layer for good: a mask tool fades the groups it doesn't use (opacity, below),
+     and WebKitGTK made and dropped a layer per group for each fade, flickering the panel's dark
+     areas (24 Oct). (opacity, not transform: nothing inside is placed against the group.) */
+  will-change: opacity;
+}
+.panel__group::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+  will-change: opacity;
+}
+.panel--focus .panel__group:not(.panel__group--lit)::after {
+  opacity: 0.5;
+}
+
+.panel__group--lit {
+  border-color: rgb(225, 252, 255);
+  box-shadow:
+    0 0 2px rgba(var(--neon), 1),
+    0 0 9px rgba(var(--neon), 0.75),
+    0 0 26px rgba(var(--neon), 0.35),
+    inset 0 0 16px rgba(var(--neon), 0.14);
+  background-image:
+    linear-gradient(rgba(var(--neon), 0.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(var(--neon), 0.1) 1px, transparent 1px);
+  background-size: 14px 14px;
+  animation: grid-power-on 0.45s ease-out;
+}
+
+@keyframes grid-power-on {
+  from {
+    background-position: 0 -60px;
+    box-shadow: 0 0 0 rgba(var(--neon), 0), inset 0 0 0 rgba(var(--neon), 0);
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel__group--lit { animation: none; }
+}
+
+.panel__title {
+  margin: 0 0 2px;
+  /* Exo 2 (SIL Open Font License, bundled via @fontsource): a touch of sci-fi
+     that stays readable small. Also used for the slider numbers and labels. */
+  font-family: "Exo 2", system-ui, sans-serif;
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #a6dde9;
+  text-shadow: 0 0 6px rgba(62, 230, 255, 0.35);
+  text-align: center;
+}
+
+/* The group's key letter: orange with a line underneath. */
+.panel__key {
+  color: #ff7a1a;
+  text-shadow: 0 0 6px rgba(255, 122, 26, 0.55);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.panel__sliders {
+  display: flex;
+  align-items: flex-end;
+  flex: 1;
+}
+
+
+/* Vertical slider */
+.vslider {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 34px;
+  border-radius: 4px;
+}
+
+/* The selected slider lights up like a glass floor tile with a light under
+   it: a solid glowing fill, brightest in the middle, under a glossy surface
+   (a soft reflection across the top, a bright top edge, a darker lower rim).
+   It strikes white-hot, then settles, while a ring of light spreads out. */
+.vslider--active {
+  background-color: rgba(var(--neon), 0.42);
+  background-image:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.3) 0%,
+      rgba(255, 255, 255, 0.1) 36%,
+      rgba(255, 255, 255, 0) 38%
+    ),
+    radial-gradient(
+      ellipse closest-side at 50% 55%,
+      rgba(250, 255, 255, 0.97) 0%,
+      rgba(228, 252, 255, 0.85) 25%,
+      rgba(var(--neon), 0.45) 60%,
+      rgba(var(--neon), 0.1) 100%
+    );
+  box-shadow:
+    inset 0 1px 0 rgba(235, 253, 255, 0.85),
+    inset 0 0 0 1px rgba(160, 240, 255, 0.55),
+    inset 0 -4px 8px rgba(0, 35, 50, 0.35),
+    0 0 10px rgba(var(--neon), 0.75),
+    0 0 26px rgba(var(--neon), 0.35);
+  animation: tile-strike 0.5s ease-out;
+}
+
+/* Keep the number and label crisp on the bright tile. */
+.vslider--active .vslider__value,
+.vslider--active .vslider__key {
+  text-shadow: 0 0 3px rgba(0, 25, 35, 0.85);
+}
+
+.vslider--active::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1px solid rgba(var(--neon), 0.9);
+  border-radius: 4px;
+  pointer-events: none;
+  animation: tile-ripple 0.65s ease-out forwards;
+}
+
+@keyframes tile-strike {
+  0% {
+    background-color: rgba(235, 253, 255, 0.5);
+    box-shadow:
+      inset 0 0 0 1px #ffffff,
+      inset 0 0 14px rgba(255, 255, 255, 0.6),
+      0 0 20px rgba(var(--neon), 1),
+      0 0 40px rgba(var(--neon), 0.6);
+  }
+}
+
+@keyframes tile-ripple {
+  from {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.4, 1.12);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vslider--active,
+  .vslider--active::after {
+    animation: none;
+  }
+  .vslider--active::after {
+    display: none;
+  }
+}
+
+.vslider__value {
+  height: 14px;
+  font-family: "Exo 2", system-ui, sans-serif;
+  font-size: 10px;
+  line-height: 14px;
+  color: #e8e8ec;
+  font-variant-numeric: tabular-nums;
+  /* Drag sideways to scrub, click to type - as in Lightroom. */
+  cursor: ew-resize;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.vslider__value--neutral {
+  color: #4a4b55;
+}
+
+.vslider__input {
+  width: 34px;
+  padding: 0;
+  border: 1px solid #3ee6ff;
+  border-radius: 2px;
+  background: #1e1e1e;
+  font-family: inherit;
+  text-align: center;
+  cursor: text;
+  outline: none;
+}
+
+.vslider__body {
+  display: flex;
+  align-items: stretch;
+  height: 162px;
+}
+
+.vslider--active .vslider__key {
+  color: #ffffff;
+}
+
+/* Wide invisible hit area around the thin track, for touch. */
+.vslider__hit {
+  display: flex;
+  justify-content: center;
+  width: 20px;
+  padding: 6px 0;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.vslider__track {
+  position: relative;
+  width: 4px;
+  height: 100%;
+  border-radius: 2px;
+  background: #1a4552;
+}
+
+.vslider__fill {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  border-radius: 2px;
+  background: #3ee6ff;
+}
+
+/* The thumb is a flat-topped hexagon; on hover it just turns orange. */
+.vslider__thumb {
+  position: absolute;
+  left: 50%;
+  margin-left: -7px;
+  margin-bottom: -6px;
+}
+
+/* White (orange under the mouse or while its key is held); a rim (--thumb-rim) only where one is set,
+   so it is always the same size. */
+.vslider__thumb polygon {
+  fill: var(--thumb-fill, #ffffff);
+  stroke: var(--thumb-rim, var(--thumb-fill, #ffffff));
+  stroke-width: 2;
+}
+
+.vslider__key {
+  margin-top: 2px;
+  font-family: "Exo 2", system-ui, sans-serif;
+  font-size: 10px;
+  color: #b7b8c2;
+  white-space: nowrap;
+  cursor: default;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* The slider's key letter (hold it in its selected panel): white, no underline.
+   Underlined letters are the panels' own, used with Shift. */
+.vslider__keyletter {
+  font-weight: inherit;
+  color: #ffffff;
+}
+
+.vslider--active .vslider__keyletter {
+  color: #ffffff;
+}
+
+
+
+
+/* Colour grading: range buttons over one wheel, sliders beside it. */
+.grade {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  flex: 1;
+}
+
+.grade__left {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Range dots beside the wheel, centred on it (the label sits below both). */
+.grade__pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.grade__ranges {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+/* A hexagonal ring (--ring) round the range's colour (--dot); drawn by RingDot. */
+.grade__range {
+  display: block;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  --ring: #1a4552;
+}
+
+.grade__range svg {
+  display: block;
+}
+
+button.grade__range:not(:disabled):hover {
+  box-shadow: none;
+}
+
+/* A changed range keeps a cyan ring even when not selected. */
+.grade__range--changed {
+  --ring: #3ee6ff;
+}
+
+.grade__range--on {
+  --ring: #e8e8ec;
+}
+
+.grade__range--on.grade__range--changed {
+  --ring: #3ee6ff;
+}
+
+/* Lightroom's range dots: black, grey, white, and half-and-half for Global
+   (which sits slightly apart from the three tonal ranges). */
+.grade__range--shadows {
+  --dot: #000000;
+}
+
+.grade__range--mids {
+  --dot: #808080;
+}
+
+.grade__range--highs {
+  --dot: #ffffff;
+}
+
+.grade__range--global {
+  margin-bottom: 6px;
+  --dot: linear-gradient(90deg, #000000 50%, #ffffff 50%);
+}
+
+.wheel__label {
+  font-size: 10px;
+  color: #8a8b96;
+}
+
+/* Shows the value while adjusting with the panel hidden (Tab). */
+.held-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  background: rgba(29, 29, 29, 0.92);
+  border: 1px solid #3ee6ff;
+  border-radius: 6px;
+  color: #3ee6ff;
+  font-size: 13px;
+  pointer-events: none;
+}
+
+
+/* Names toggled off: letter-only sliders take less width. */
+.vslider--compact {
+  width: 26px;
+}
+
+/* Curves (after Definition; also does the job of Levels) */
+.curves {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  flex: 1;
+  padding-top: 2px;
+}
+
+.curves__channels {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.curves__channel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 24px;
+  padding: 0;
+  background: #101010;
+  border: 1px solid #12303a;
+  border-radius: 4px;
+  color: #b7b8c2;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.curves__channel:hover {
+  border-color: #3ee6ff;
+}
+
+.curves__channel--on {
+  border-color: #3ee6ff;
+  background: #303030;
+}
+
+/* Underline marks a channel whose curve has been changed. */
+.curves__channel--edited {
+  box-shadow: inset 0 -2px 0 currentColor;
+}
+
+.curves__graph {
+  flex-shrink: 0;
+  background: #080808;
+  border: 1px solid #12303a;
+  border-radius: 4px;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.curves__grid line {
+  stroke: #24252d;
+  stroke-width: 1;
+}
+
+.curves__cellnum {
+  fill: #6e6f7a;
+  font-size: 14px;
+  font-weight: 600;
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* The square whose point the arrow keys are moving (its number key held). */
+.curves__cellnum--held {
+  fill: #3ee6ff;
+}
+
+/* Curve points: solid white, like the sliders' thumbs. */
+.curves__point {
+  fill: #ffffff;
+  stroke: #080808;
+  stroke-width: 1;
+}
+
+.curves__diagonal {
+  stroke: #363636;
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+/* The graph, plus the region sliders beside it on the Region tab. */
+.curves__body {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.curves__regions {
+  display: flex;
+  gap: 2px;
+}
+
+/* Region tab: where two regions meet, and its handle on the bottom edge. */
+.curves__split-line {
+  stroke: #3ee6ff;
+  stroke-opacity: 0.25;
+  stroke-width: 1;
+}
+
+.curves__split-handle {
+  fill: #3ee6ff;
+  stroke: #080808;
+  stroke-width: 1;
+  cursor: ew-resize;
+}
+
+/* Editing tools (crop, masking): gold icons, as RapidRetouch's tools. */
+/* Colour grading wheels. The ring's hue order matches grade.ts: red at the
+   right, then anticlockwise yellow, green, cyan, blue, magenta. Muted so it
+   reads as a control, not a colour swatch. */
+.wheel__ring {
+  position: relative;
+  width: 128px;
+  height: 128px;
+  /* A hexagon, drawn in GradeWheels (hexWheelImage); the disc's colours stretched to its edge. */
+  background-size: 100% 100%;
+  clip-path: var(--hex-wheel);
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.wheel__centre {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  clip-path: var(--hex);
+  background: #6c6d78;
+  pointer-events: none;
+}
+
+/* A white hexagon with a light grey rim (moved: cyan), so it reads the same
+   size whether or not it has been moved; only the colour says so. */
+.wheel__puck {
+  position: absolute;
+  margin: -5px 0 0 -5px;
+  pointer-events: none;
+  --ring: #8f969e;
+}
+
+.wheel__puck--moved {
+  --ring: #3ee6ff;
+}
+
+/* The photo's ISO and aperture, top left of the graph. */
+.curves__shot {
+  font-family: "Exo 2", system-ui, sans-serif;
+  font-size: 10px;
+  fill: #a3a4ae;
+  pointer-events: none;
+}
+
+.curves__histogram {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* The graph on a layer of its own, so WebKitGTK repaints all of it when any part changes. */
+.curves__graph {
+  will-change: transform;
+}
+
+
+
+/* Rotated/keystoned previews must not spill over the panel and filmstrip. */
+.viewer__main {
+  overflow: hidden;
+}
+
+/* A group heading with small icon buttons (Keystone: auto level / auto keystone). */
+.panel__title-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin-bottom: 0;
+}
+
+.panel__title-row .panel__title {
+  margin: 0 2px 0 0;
+}
+
+.mini-btn {
+  gap: 3px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 12px;
+  color: #3ee6ff;
+}
+
+/* On: this photo has that auto straighten applied (click again to turn it off). */
+.mini-btn--on {
+  background: #3ee6ff;
+  border-color: #3ee6ff;
+  color: #05080c;
+}
+
+/* Keep the measuring button visible (not faded like the other disabled one). */
+.mini-btn--busy:disabled {
+  opacity: 1;
+  border-color: #3ee6ff;
+}
+
+/* Colour mixer: 2x4 colour dots, then Hue / Saturation / Luminance. */
+.mixer {
+  display: flex;
+  align-items: flex-end;
+  flex: 1;
+}
+
+.mixer__dots {
+  display: grid;
+  grid-template-columns: repeat(2, 18px);
+  gap: 6px;
+  align-self: center;
+  margin-right: 6px;
+}
+
+/* A hexagonal ring (--ring) round the band's colour (--dot); drawn by RingDot. */
+.mixer__dot {
+  display: block;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: none;
+  --ring: #1a4552;
+}
+
+.mixer__dot svg {
+  display: block;
+}
+
+.mixer__dot:hover:not(:disabled) {
+  --ring: #3ee6ff;
+  box-shadow: none;
+}
+
+/* Cyan ring = selected band. */
+.mixer__dot--on,
+.mixer__dot--on:hover:not(:disabled) {
+  --ring: #3ee6ff;
+}
+
+/* Calibration's three primary dots stack in a single column. */
+.mixer__dots--column {
+  grid-template-columns: 18px;
+  margin-left: 6px;
+}
+
+/* Colour-scale slider (Temperature, Tint), as RapidRetouch: the track is the
+   colour scale, a little wider, and the thumb gets a dark ring so it shows
+   over the pale middle. */
+.vslider__track--scale {
+  width: 6px;
+  border-radius: 3px;
+}
+
+/* On a colour scale the hexagon gets a dark rim (an outer dark hexagon with a
+   white one inside) so it shows against any colour. */
+/* On the lit tile (its key held) the thumb is as under the mouse: Tron orange, its full size (a dark
+   rim made it look smaller), with a faint shadow to stand out on the tile's near-white centre. */
+.vslider--active .vslider__thumb {
+  --thumb-fill: rgb(var(--tron-orange));
+  filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.7));
+}
+
+/* On a colour scale the hexagon is the same as every other slider's; a soft dark
+   shadow, not a rim, keeps it visible over the pale middle of the scale. */
+.vslider__track--scale .vslider__thumb {
+  filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.95));
+}
+
+/* Viewer info line: engine/camera source and the hold-to-compare button. */
+.viewer__source {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.viewer__compare {
+  pointer-events: auto;
+  color: #b7b8c2;
+}
+
+/* Empty-viewer terminal prompt (TerminalPrompt.tsx): cyan monospace with a soft
+   glow, a block cursor that blinks once the lines have typed out. */
+.terminal {
+  --neon: 62, 230, 255;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 330px;
+  padding: 18px 22px;
+  background: rgba(8, 8, 8, 0.85);
+  border: 1px solid rgba(var(--neon), 0.35);
+  border-radius: 6px;
+  box-shadow: 0 0 14px rgba(var(--neon), 0.15), inset 0 0 18px rgba(var(--neon), 0.05);
+  font-family: "Cascadia Mono", Consolas, "DejaVu Sans Mono", "Courier New", monospace;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  color: rgb(190, 246, 255);
+  text-shadow: 0 0 6px rgba(var(--neon), 0.6);
+}
+
+.terminal__line {
+  white-space: pre;
+  min-height: 1.3em;
+}
+
+.terminal__line--title {
+  color: rgb(var(--neon));
+  letter-spacing: 0.12em;
+}
+
+.terminal__prompt {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  align-self: flex-start;
+  white-space: pre;
+  min-height: 1.3em;
+  margin-top: 4px;
+  padding: 5px 10px;
+  border: 1px solid rgba(var(--neon), 0.75);
+  border-radius: 4px;
+  box-shadow: 0 0 6px rgba(var(--neon), 0.45), inset 0 0 8px rgba(var(--neon), 0.12);
+  transition: box-shadow 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.terminal__prompt:hover,
+.terminal__prompt:focus-visible {
+  /* Tron: Legacy orange, on hover only. */
+  --neon: 255, 122, 26;
+  color: #fff;
+  border-color: rgb(255, 236, 220);
+  text-shadow: 0 0 8px rgba(var(--neon), 0.9);
+  box-shadow: 0 0 2px rgba(var(--neon), 1), 0 0 12px rgba(var(--neon), 0.7), 0 0 24px rgba(var(--neon), 0.3), inset 0 0 10px rgba(var(--neon), 0.18);
+}
+
+.terminal__cursor {
+  display: inline-block;
+  width: 0.6em;
+  height: 1.05em;
+  margin-left: 3px;
+  /* Always Tron orange, whatever the prompt box is doing. */
+  background: rgb(255, 122, 26);
+  box-shadow: 0 0 8px rgba(255, 122, 26, 0.8);
+}
+
+.terminal__cursor--blink {
+  animation: terminal-blink 1.05s steps(1) infinite;
+}
+
+@keyframes terminal-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terminal__cursor--blink { animation: none; }
+}
+
+/* Tron: Legacy scheme: cyan at rest; orange glows only on hover. */
+:root {
+  --tron-orange: 255, 122, 26;
+}
+
+button:not(:disabled):hover {
+  border-color: rgb(var(--tron-orange)) !important;
+  color: rgb(255, 230, 210);
+  box-shadow: 0 0 6px rgba(var(--tron-orange), 0.7), 0 0 16px rgba(var(--tron-orange), 0.3);
+}
+
+.panel__group:hover:not(.panel__group--lit) {
+  border-color: rgba(var(--tron-orange), 0.85);
+  box-shadow: 0 0 8px rgba(var(--tron-orange), 0.45), inset 0 0 12px rgba(var(--tron-orange), 0.08);
+}
+
+.vslider:hover .vslider__thumb {
+  --thumb-fill: rgb(var(--tron-orange));
+}
+
+
+
+/* Panels: neutral greys (no tint, like the photo's surround) with a subtle
+   gloss: a soft sheen at the top fading into a slightly deeper bottom. */
+.titlebar,
+.topbar,
+.panel {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.012) 38%, rgba(0, 0, 0, 0.24) 100%);
+}
+
+/* (Not the lit panel, which shows its power-on grid.) */
+.panel__group:not(.panel__group--lit) {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.035) 0%, rgba(255, 255, 255, 0) 45%, rgba(0, 0, 0, 0.2) 100%);
+}
+
+/* The top bar: tools either side, the mode switch in the middle (centred while
+   there's room; squeezed, it moves aside rather than covering a side's tools). */
+.topbar__side {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  gap: 8px;
+  min-width: max-content;
+}
+
+.topbar__side--right {
+  justify-content: flex-end;
+}
+
+/* Cull | Edit | Retouch (after Affinity's persona switch): hexagonal ends,
+   a lit hexagonal slider gliding to the chosen one. */
+.modeswitch {
+  --notch: 11px;
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, 84px);
+  flex-shrink: 0;
+  padding: 2px;
+  clip-path: polygon(var(--notch) 0, calc(100% - var(--notch)) 0, 100% 50%, calc(100% - var(--notch)) 100%, var(--notch) 100%, 0 50%);
+  background: linear-gradient(180deg, #1a4552, #0e2a33);
+}
+
+/* The inner face, inset 1px from the cyan edge. */
+.modeswitch::before {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  clip-path: polygon(calc(var(--notch) - 0.5px) 0, calc(100% - var(--notch) + 0.5px) 0, 100% 50%, calc(100% - var(--notch) + 0.5px) 100%, calc(var(--notch) - 0.5px) 100%, 0 50%);
+  background: linear-gradient(180deg, #151515, #070707);
+}
+
+.modeswitch__slider {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 6px) / 3);
+  clip-path: polygon(8px 0, calc(100% - 8px) 0, 100% 50%, calc(100% - 8px) 100%, 8px 100%, 0 50%);
+  background: linear-gradient(180deg, #5ff0ff, #1fb8d0);
+  box-shadow: 0 0 12px rgba(62, 230, 255, 0.6);
+  transition: transform 0.28s cubic-bezier(0.3, 0.8, 0.3, 1);
+}
+
+.modeswitch__option {
+  position: relative;
+  justify-content: center;
+  padding: 5px 0;
+  border: none !important;
+  background: none !important;
+  box-shadow: none !important;
+  color: #8a8b96;
+  font-family: "Exo 2", system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition: color 0.2s ease;
+}
+
+.modeswitch__option:hover:not(.modeswitch__option--on) {
+  color: rgb(255, 150, 70) !important;
+}
+
+.modeswitch__option--on {
+  color: #050505 !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modeswitch__slider {
+    transition: none;
+  }
+}
+
+/* A module's screen (Cull / Retouch) fills the space under the top bar. */
+.module-host {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.module-host > * {
+  flex: 1;
+  min-height: 0;
+}
+
+/* The start screen's folder-reading progress line. */
+.terminal__progress {
+  white-space: pre;
+  padding: 2px 11px;
+  color: rgba(190, 246, 255, 0.7);
+}
+
+/* Retouch's toolbar, shown in the top bar on its tab. */
+.topbar__slot {
+  display: flex;
+  min-width: 0;
+}
+
+/* While the graded photo is rendered for Retouch. */
+.module-host {
+  position: relative;
+}
+
+.handoff-busy {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  z-index: 60;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border: 1px solid rgba(62, 230, 255, 0.5);
+  border-radius: 6px;
+  background: rgba(8, 8, 8, 0.9);
+  box-shadow: 0 0 10px rgba(62, 230, 255, 0.25);
+  color: #a6dde9;
+  font-family: "Exo 2", system-ui, sans-serif;
+  font-size: 12px;
+}
+
+/* Auto Style menu: each style with This photo / All photos. */
+.autostyle__menu {
+  gap: 4px;
+  width: 380px;
+}
+
+.autostyle__style {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.autostyle__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: #a6dde9;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.autostyle__style button {
+  flex-shrink: 0;
+  border: 1px solid #14343f;
+  font-size: 11px;
+}
+
+.autostyle__empty {
+  margin: 4px;
+  color: #8a8b96;
+  font-size: 12px;
+}
+
+.autostyle__heading {
+  margin: 2px 4px 2px;
+  color: #8a8b96;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.autostyle__menu .autostyle__train {
+  margin-top: 4px;
+  border-top: 1px solid #14343f;
+  border-radius: 0;
+}
+
+/* The style's size under its name. */
+.autostyle__name small {
+  display: block;
+  color: #8a8b96;
+  font-size: 10px;
+}
+
+.autostyle__style .autostyle__increase {
+  padding: 3px 5px;
+}
+
+/* Train Style: name, folders, Train. */
+.autostyle__form {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid #14343f;
+}
+
+.autostyle__form input {
+  padding: 5px 7px;
+  border: 1px solid #14343f;
+  border-radius: 4px;
+  background: #050708;
+  color: #e6f9ff;
+  font: inherit;
+  font-size: 12px;
+}
+
+.autostyle__form input:focus {
+  border-color: #3ee6ff;
+  outline: none;
+}
+
+.autostyle__folder {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  color: #a6dde9;
+  font-size: 11px;
+}
+
+.autostyle__folder span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.autostyle__folder button {
+  padding: 2px;
+}
+
+.autostyle__hint,
+.autostyle__warn {
+  margin: 0 4px;
+  color: #8a8b96;
+  font-size: 10px;
+}
+
+.autostyle__warn {
+  color: #f0a6a6;
+}
+
+.autostyle__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.autostyle__actions .is-primary:not(:disabled) {
+  border: 1px solid #3ee6ff;
+  color: #3ee6ff;
+}
+
+/* Denoise all: ISO threshold, the amount, Apply. */
+.denoise__menu {
+  width: 300px;
+}
+.denoise__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 4px;
+  font-size: 12px;
+}
+.denoise__row input[type="range"] {
+  flex: 1;
+  accent-color: #3ee6ff;
+}
+.denoise__row select {
+  flex: 1;
+}
+.denoise__value {
+  width: 28px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Copy settings: each group with an on / off switch on the right. */
+.topbar__dropdown .copypaste__group {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: #6f8a92;
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.topbar__dropdown .copypaste__group--on {
+  color: #a6dde9;
+}
+
+.topbar__dropdown .copypaste__group:hover {
+  background: rgba(255, 122, 26, 0.12);
+  box-shadow: none;
+}
+
+.copypaste__name {
+  flex: 1;
+  min-width: 0;
+}
+
+/* An on / off switch: a dark track, the knob on the left when off; lit cyan with
+   the knob on the right when on. */
+.toggle {
+  position: relative;
+  flex-shrink: 0;
+  width: 28px;
+  height: 14px;
+  border: 1px solid #14343f;
+  border-radius: 7px;
+  background: #0f0f0f;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.toggle__knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4a4b55;
+  transition: left 0.15s ease, background 0.15s ease;
+}
+
+.copypaste__group--on .toggle {
+  border-color: #3ee6ff;
+  background: rgba(62, 230, 255, 0.25);
+  box-shadow: 0 0 6px rgba(62, 230, 255, 0.45);
+}
+
+.copypaste__group--on .toggle__knob {
+  left: 16px;
+  background: #3ee6ff;
+}
+
+.copypaste__group:hover .toggle {
+  border-color: rgb(255, 122, 26);
+}
+
+.copypaste__quick {
+  display: flex;
+  gap: 4px;
+  margin: 2px 4px;
+}
+
+.copypaste__quick button {
+  border: 1px solid #14343f;
+  font-size: 11px;
+}
+
+/* Remove tool: drag a box over the photo (RemoveOverlay). */
+.remove-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  cursor: crosshair;
+}
+
+.remove-box {
+  position: absolute;
+  border: 2px solid #3ee6ff;
+  background: rgba(62, 230, 255, 0.1);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.35), 0 0 12px rgba(62, 230, 255, 0.45);
+  pointer-events: none;
+}
+
+.remove-box--busy {
+  animation: remove-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes remove-pulse {
+  50% {
+    border-color: rgba(62, 230, 255, 0.35);
+    background: rgba(62, 230, 255, 0.2);
+  }
+}
+
+.removebar {
+  cursor: default;
+  max-width: calc(100% - 24px);
+}
+
+.removebar input {
+  width: 360px;
+  min-width: 0;
+  flex: 0 1 360px;
+  padding: 4px 7px;
+  border: 1px solid #14343f;
+  border-radius: 4px;
+  background: #050708;
+  color: #e6f9ff;
+  font: inherit;
+}
+
+.removebar input:focus {
+  border-color: #3ee6ff;
+  outline: none;
+}
+
+.removebar .is-primary:not(:disabled) {
+  border: 1px solid #3ee6ff;
+  color: #3ee6ff;
+}
+
+.removebar__busy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #a6dde9;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.cropbar__what svg {
+  vertical-align: -2px;
+}
+
+/* Ctrl+E: the whole photo selected, waiting for words. */
+.remove-box--whole {
+  border-style: dashed;
+  background: transparent;
+  box-shadow: 0 0 12px rgba(62, 230, 255, 0.35);
+}
+
+/* Remove: objects SAM 3 found (Tab picks, Enter removes). */
+.remove-outline {
+  position: absolute;
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.remove-outline--picked {
+  opacity: 1;
+}
+
+.remove-box--found {
+  border-style: solid;
+  background: transparent;
+  box-shadow: 0 0 14px rgba(62, 230, 255, 0.55);
+}
+
+.removebar__found {
+  color: #e6f9ff;
+}
+
+.removebar__keys,
+.removebar__note {
+  color: #8a8b96;
+  font-size: 11px;
+}
+
+/* Remove: brush strokes, and the Box / Brush switch. */
+.remove-paint {
+  position: absolute;
+  pointer-events: none;
+}
+
+.removebar__tools {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.removebar__tools button {
+  padding: 3px 5px;
+}
+
+.removebar__tools .is-on {
+  border-color: #3ee6ff;
+  color: #3ee6ff;
+}
+
+/* Legacy (Lightroom) vignette: icon on the Effects panel and its pop-up. */
+.legacy-vignette {
+  position: relative;
+  display: inline-flex;
+}
+
+.legacy-vignette__pop {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 250px;
+  padding: 8px 10px;
+  border: 1px solid rgba(62, 230, 255, 0.45);
+  border-radius: 6px;
+  background: rgba(8, 8, 8, 0.96);
+  box-shadow: 0 0 12px rgba(62, 230, 255, 0.2), 0 6px 18px rgba(0, 0, 0, 0.5);
+  font-family: "Exo 2", system-ui, sans-serif;
+  font-size: 12px;
+}
+
+.legacy-vignette__title {
+  margin: 0;
+  color: #a6dde9;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.legacy-vignette__toggle {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: #e6f9ff;
+}
+
+.legacy-vignette__toggle input {
+  accent-color: #3ee6ff;
+}
+
+.legacy-vignette__note {
+  margin: 0;
+  color: #8a8b96;
+  font-size: 10px;
+}
+
+.legacy-vignette__row {
+  display: grid;
+  grid-template-columns: 70px 1fr 30px;
+  align-items: center;
+  gap: 6px;
+  color: #a6dde9;
+}
+
+.legacy-vignette__row input {
+  accent-color: #3ee6ff;
+}
+
+.legacy-vignette__row--off {
+  opacity: 0.45;
+}
+
+.legacy-vignette__value {
+  text-align: right;
+  color: #e6f9ff;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Linear / radial gradients: lines, pins and handles on the photo, sliders in the bar. */
+/* Zoomed in, the drawing can be far bigger than the view: keep it inside. */
+.gradient-layer {
+  overflow: hidden;
+}
+
+.gradient-svg {
+  position: absolute;
+  overflow: visible;
+  pointer-events: none;
+  /* Its own layer, so WebKitGTK repaints all of it when anything in it moves. */
+  will-change: transform;
+}
+
+/* The brush stroke being painted (until it's let go): red as the mask overlay, grey erasing. */
+.gradient-live-stroke {
+  fill: none;
+  stroke: rgba(255, 40, 40, 0.59);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+.gradient-live-stroke--erase {
+  stroke: rgba(160, 160, 160, 0.5);
+}
+
+.gradient-line {
+  fill: none;
+  stroke: #3ee6ff;
+  stroke-width: 1.5;
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.9));
+}
+
+.gradient-line--mid {
+  stroke-dasharray: 5 4;
+  stroke-width: 1;
+}
+
+.gradient-pin,
+.gradient-handle {
+  pointer-events: all;
+  fill: #050708;
+  stroke: #3ee6ff;
+  stroke-width: 1.5;
+  cursor: move;
+}
+
+.gradient-shape--on .gradient-pin {
+  fill: #3ee6ff;
+}
+
+.gradient-handle {
+  cursor: pointer;
+}
+
+.gradient-handle--rotate {
+  stroke-dasharray: 2 2;
+  cursor: grab;
+}
+
+.gradient-pin:hover,
+.gradient-handle:hover {
+  stroke: rgb(255, 122, 26);
+}
+
+.gradientbar {
+  flex-wrap: wrap;
+  max-width: calc(100% - 32px);
+  white-space: normal;
+}
+
+.gradientbar__slider {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #a6dde9;
+}
+
+.gradientbar__slider input[type="range"] {
+  width: 80px;
+}
+
+.gradientbar__value {
+  min-width: 30px;
+  color: #e6f9ff;
+  font-variant-numeric: tabular-nums;
+}
+
+
+/* The top bar's tools are icons only; each one's name (and shortcut, where
+   it has one) shows on hover. A running count (Style's progress) still shows. */
+.topbar .topbar__label {
+  display: none;
+}
+
+.topbar__side > button,
+.topbar__side .topbar__menu > button {
+  padding-left: 7px;
+  padding-right: 7px;
+}
+
+/* A style's name, then its counts with + (more training) beside them. */
+.autostyle__info {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+}
+
+.autostyle__count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.autostyle__count small {
+  color: #8a8b96;
+  font-size: 10px;
+}
+
+.autostyle__info .autostyle__name {
+  flex: none;
+  max-width: 100%;
+}
+
+/* A clear line between Apply Style and Straighten in the Style menu. */
+.autostyle__heading--gap {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(62, 230, 255, 0.15);
+}
+
+/* Style menu: headings, style names, Level rows and Train new style all
+   start at the same left edge. */
+.autostyle__menu .autostyle__style {
+  padding-left: 4px;
+}
+
+.autostyle__menu .autostyle__train {
+  justify-content: flex-start;
+  padding-left: 4px;
+}
+
+/* Style menu headings (Apply Style, Perspective, Train new style) in Tron orange. */
+.autostyle__menu .autostyle__heading {
+  color: rgb(255, 122, 26);
+}
+
+/* Zoomed in: its own layer over the view (clipped); the framed photo stays
+   put underneath, hidden, so nothing animates on zooming; drag pans. */
+.viewer__zoomlayer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  overflow: hidden;
+  cursor: grab;
+}
+
+.viewer__zoomlayer:active {
+  cursor: grabbing;
+}
+
+.viewer__zoomlayer .viewer__img {
+  box-shadow: none;
+  object-fit: fill;
+  transition: none;
+}
+
+/* Zoom readout and buttons, top left of the view. */
+.viewer__zoomhud {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
+  border: 1px solid rgba(62, 230, 255, 0.3);
+  border-radius: 5px;
+  background: rgba(8, 8, 8, 0.82);
+  font-family: "Exo 2", system-ui, sans-serif;
+  font-size: 11px;
+}
+
+.viewer__zoomhud button {
+  padding: 2px 6px;
+  font-size: 11px;
+}
+
+.viewer__zoomlevel {
+  min-width: 40px;
+  color: #e6f9ff;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Zoomed in: the full-resolution part on screen, over the preview. */
+.viewer__detail {
+  position: absolute;
+  pointer-events: none;
+  image-rendering: auto;
+}
+
+/* The photo always fills its frame (which has the photo's shape), whatever
+   size the render is: a smaller render shown while a slider moves would
+   otherwise sit at its own pixel size and the photo would shrink back. */
+.viewer__frame > .viewer__img {
+  width: 100%;
+  height: 100%;
+}
+
+/* Crossfade between renders (see Viewer): the one before stays underneath,
+   the new one fades in. */
+.viewer__img--under {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.viewer__img--fade {
+  animation: render-fade 60ms linear;
+}
+
+@keyframes render-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .viewer__img--fade {
+    animation: none;
+  }
+}
+
+/* The new render above the one it fades in over (the one underneath is
+   absolutely placed, so without this it would cover the new one). */
+.viewer__frame > .viewer__img:not(.viewer__img--under) {
+  position: relative;
+  z-index: 1;
+}
+
+.viewer__frame > .viewer__img--under {
+  z-index: 0;
+}
+
+/* The alignment grid over the photo while levelling or keystoning. */
+.viewer__frame > .viewer__grid {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 3;
+  pointer-events: none;
+}
+.viewer__grid line {
+  stroke: rgba(255, 255, 255, 0.35);
+  stroke-width: 1;
+}
+.viewer__grid line.viewer__grid-mid {
+  stroke: rgba(62, 230, 255, 0.7);
+}
+
+/* Hold-to-compare's Before, laid over the picture (which stays where it is, so letting go shows
+   it at once rather than a fresh picture element WebKit would paint empty for a frame). */
+.viewer__frame > .viewer__img.viewer__img--over {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  z-index: 2;
+}
+
+/* Erase's brush: its size round the pointer, drawn as the mask brush's (.gradient-cursor). */
+.remove-brush-cursor {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  overflow: visible;
+}
+
+/* The whole photo's stand-in for Masks, Patch and Erase over a cropped picture (Viewer): never seen,
+   only measured. */
+.viewer__proxy {
+  position: absolute;
+  max-width: none;
+  max-height: none;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Export: the button and the Selected | All slide switch beside it. */
+.exportbar {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+/* The button and the switch share one outline; the switch is the right-hand part of the button. */
+.exportbar > button {
+  border: 0;
+  border-radius: 0;
+}
+
+.exportbar > .slideswitch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-left: 1px solid #2a2a2a;
+  background: transparent;
+  color: #8d8e99;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.slideswitch__track {
+  position: relative;
+  width: 26px;
+  height: 12px;
+  border-radius: 6px;
+  background: #2a2a2a;
+}
+
+.slideswitch__knob {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #3ee6ff;
+  transition: left 0.15s ease;
+}
+
+.slideswitch--all .slideswitch__knob {
+  left: 15px;
+}
+
+/* The side that is chosen reads brighter. */
+.slideswitch .slideswitch__label:first-child {
+  color: #e6f9ff;
+}
+
+.slideswitch .slideswitch__label:last-child {
+  color: #5d5e68;
+}
+
+.slideswitch--all .slideswitch__label:first-child {
+  color: #5d5e68;
+}
+
+.slideswitch--all .slideswitch__label:last-child {
+  color: #e6f9ff;
+}
+
+/* Getting the retouched TIFF back: saving it, adding it to the library, opening it
+   (a big Fuji TIFF takes a few seconds at each). Cyan with Tron orange, as the AI download screen. */
+.handback-progress {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+  padding: 8px 14px;
+  background: #000000;
+  border-bottom: 1px solid rgb(255, 122, 26);
+  box-shadow: inset 0 1px 0 rgb(255, 122, 26);
+  font-family: "Exo 2", system-ui, sans-serif;
+  font-size: 12px;
+  color: #3ee6ff;
+  letter-spacing: 0.03em;
+  text-shadow: none;
+}
+
+.handback-progress__label {
+  flex-shrink: 0;
+  min-width: 250px;
+}
+
+.handback-progress__bar {
+  position: relative;
+  flex: 1;
+  height: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(62, 230, 255, 0.4);
+  border-radius: 4px;
+  background: rgba(62, 230, 255, 0.08);
+}
+
+.handback-progress__fill {
+  position: relative;
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, rgb(255, 122, 26), #3ee6ff);
+  box-shadow: 0 0 8px rgba(62, 230, 255, 0.6);
+  transition: width 0.4s ease;
+}
+
+/* A light sweep along the filled part, so it reads as working while a stage has no measurable progress. */
+.handback-progress__fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+  animation: handback-sweep 1.2s linear infinite;
+}
+
+@keyframes handback-sweep {
+  from {
+    background-position: -40% 0;
+  }
+  to {
+    background-position: 140% 0;
+  }
+}
+
+/* The two tick boxes (Slider names, D65 lines/glow), stacked at the left of the W/B group. */
+.panel__options {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 6px 4px 0;
+}
+
+.panel__options .check {
+  white-space: nowrap;
+}
+
+/* Right-click menu (ContextMenu.tsx): Tron orange frame, cyan text; each item asks "Are you sure?" with Yes / No. */
+.ctxmenu {
+  position: fixed;
+  z-index: 10000;
+  min-width: 200px;
+  padding: 4px;
+  background: #000000;
+  border: 1px solid rgb(255, 122, 26);
+  border-radius: 6px;
+  box-shadow: 0 0 10px rgba(255, 122, 26, 0.35), 0 6px 24px rgba(0, 0, 0, 0.6);
+  font-family: "Exo 2", sans-serif;
+  color: #3ee6ff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75);
+}
+.ctxmenu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 12px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: #3ee6ff;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  text-shadow: none;
+}
+.ctxmenu__item:hover {
+  background: rgba(255, 122, 26, 0.18);
+}
+.ctxmenu__ask {
+  padding: 8px 10px 6px;
+}
+.ctxmenu__question {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.ctxmenu__answers {
+  display: flex;
+  gap: 6px;
+}
+.ctxmenu__answer {
+  flex: 1;
+  padding: 5px 10px;
+  border: 1px solid rgba(62, 230, 255, 0.5);
+  border-radius: 4px;
+  background: none;
+  color: #3ee6ff;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  font-weight: 600;
+  text-shadow: none;
+}
+.ctxmenu__answer:hover,
+.ctxmenu__answer:focus {
+  border-color: rgb(255, 122, 26);
+  background: rgba(255, 122, 26, 0.18);
+  outline: none;
+}
+.ctxmenu__answer--yes {
+  border-color: rgb(255, 122, 26);
+}
+.ctxmenu__item:disabled,
+.ctxmenu__item:disabled:hover {
+  background: none;
+  color: rgba(62, 230, 255, 0.35);
+  cursor: default;
+}
+/* Stars and pick at the top of a photo's right-click menu. */
+.ctxmenu__flags {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid rgba(255, 122, 26, 0.45);
+}
+.ctxmenu__star,
+.ctxmenu__pick {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: rgba(62, 230, 255, 0.55);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ctxmenu__star--on,
+.ctxmenu__pick--on {
+  color: #3ee6ff;
+}
+.ctxmenu__pick {
+  margin-left: auto;
+  border: 1px solid rgba(62, 230, 255, 0.4);
+}
+.ctxmenu__star:hover,
+.ctxmenu__pick:hover {
+  background: rgba(255, 122, 26, 0.18);
+  color: rgb(255, 122, 26);
+}
+
+/* Export: the last button in the top bar, its name showing, filled Tron orange. */
+.topbar .topbar__export {
+  gap: 6px;
+  margin-left: 4px;
+  background: rgb(255, 122, 26);
+  border-color: rgb(255, 122, 26);
+  color: #101010;
+  font-weight: 600;
+}
+.topbar .topbar__export:hover:not(:disabled) {
+  background: rgb(255, 122, 26);
+  border-color: rgb(255, 122, 26);
+  color: #ffffff;
+}
+.topbar .topbar__export:disabled {
+  background: rgba(255, 122, 26, 0.3);
+  border-color: transparent;
+  color: rgba(16, 16, 16, 0.7);
+}
+
+/* A slider raised above its neutral fills Tron orange; lowered, cyan (.vslider__fill). */
+.vslider__fill--plus {
+  background: rgb(255, 122, 26);
+}
+
+/* The engine's picture fills the photo's frame exactly. The frame takes its shape from
+   the full preview; the smaller renders while a slider moves can round a pixel
+   differently, and with "contain" they sat a pixel short, the frame showing as a thin
+   bar and the photo shifting. */
+.viewer__frame .viewer__img--frame {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  object-fit: fill;
+}
+
+/* The mode switch, centred (Retouch's status line is in the title bar). */
+.topbar__center {
+  position: relative;
+  flex-shrink: 0;
+}
+
+/* The masking tools (Linear, Radial, Subject...): their own group, about 1 cm of space either side. */
+.topbar__group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.topbar__group--masking {
+  margin: 0 30px;
+}
+
+/* A subject mask's overlay: the photo's subject in red while the mask is picked (as Lightroom's). */
+.gradient-subject {
+  position: absolute;
+  object-fit: fill;
+  pointer-events: none;
+}
+.gradient-pin--subject {
+  cursor: pointer;
+}
+.gradient-pin__label {
+  font-family: "Exo 2", system-ui, sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  fill: #101010;
+  pointer-events: none;
+}
+
+/* Tick boxes in the tool bars stay tick boxes (the bar's text field rule would stretch them). */
+.removebar .check input {
+  width: 14px;
+  min-width: 14px;
+  height: 14px;
+  flex: none;
+  padding: 0;
+}
+
+/* Brush mask: where the picked one is painted, in red (erasing in grey), and the brush ring. */
+.gradient-brush polyline {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+.gradient-brush__paint {
+  stroke: rgba(255, 40, 40, 0.45);
+}
+.gradient-brush__erase {
+  stroke: rgba(20, 20, 20, 0.55);
+}
+.gradient-layer--brush {
+  cursor: none;
+}
+.gradient-cursor circle {
+  fill: none;
+  stroke: #3ee6ff;
+  stroke-width: 1;
+  pointer-events: none;
+}
+.gradient-cursor .gradient-cursor__inner {
+  stroke-dasharray: 3 3;
+  opacity: 0.7;
+}
+.gradient-cursor--erase circle {
+  stroke: rgb(255, 122, 26);
+}
+
+
+/* While pasted photos are brought up to date: the app under a see-through cover (no
+   clicks reach it), the progress bar and the title bar above it. */
+/* Over the editing area (the photo, the panels, the filmstrip or library), exactly its size;
+   the top bar stays as it is. */
+.busy-lock {
+  position: absolute;
+  inset: 0;
+  z-index: 9000;
+  /* Greyed and a little dimmed, so the app shows through but clearly isn't live. */
+  background: rgba(8, 8, 8, 0.2);
+  backdrop-filter: grayscale(0.85) brightness(0.75);
+  -webkit-backdrop-filter: grayscale(0.85) brightness(0.75);
+  cursor: progress;
+}
+.handback-progress--lock {
+  position: relative;
+  z-index: 9001;
+}
+.titlebar {
+  z-index: 9002;
+}
+.handback-progress__stop {
+  flex-shrink: 0;
+  padding: 3px 12px;
+  border: 1px solid rgb(255, 122, 26);
+  border-radius: 4px;
+  background: none;
+  color: #3ee6ff;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* Copy settings menu: Copy from this photo and Paste to this photo / selected as the lit
+   Edit tab (pointed ends, the cyan gradient); Paste to all photos the same in Tron orange.
+   The text turns white on hover. */
+.copypaste__menu .autostyle__train,
+.copypaste__menu .autostyle__actions button {
+  padding: 6px 16px;
+  border: none !important;
+  border-radius: 0;
+  clip-path: polygon(8px 0, calc(100% - 8px) 0, 100% 50%, calc(100% - 8px) 100%, 8px 100%, 0 50%);
+  background: linear-gradient(180deg, #5ff0ff, #1fb8d0);
+  box-shadow: none !important;
+  color: #050505;
+  font-weight: 600;
+}
+.copypaste__menu .autostyle__actions button.is-primary {
+  background: linear-gradient(180deg, #ffa25a, #e2600e);
+}
+.copypaste__menu .autostyle__train:hover:not(:disabled),
+.copypaste__menu .autostyle__actions button:hover:not(:disabled) {
+  color: #ffffff;
+}
+.copypaste__menu .autostyle__train:disabled,
+.copypaste__menu .autostyle__actions button:disabled {
+  opacity: 0.35;
+  color: #050505;
+}
+
+/* All three the same size, stacked on the left (Copy no longer spans the menu); black text
+   on the orange Paste to all photos, hover included. */
+.copypaste__menu .autostyle__train,
+.copypaste__menu .autostyle__actions button {
+  align-self: flex-start;
+  justify-content: center;
+  width: 190px;
+  flex: none;
+}
+.copypaste__menu .autostyle__actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.copypaste__menu .autostyle__actions button.is-primary,
+.copypaste__menu .autostyle__actions button.is-primary:hover:not(:disabled) {
+  color: #050505;
+}
+
+/* The Paste button while settings are copied: an orange glow, so it's clear there's something to paste. */
+.topbar .paste--ready:not(:disabled) {
+  border-color: rgb(255, 122, 26) !important;
+  color: rgb(255, 150, 70);
+  box-shadow: 0 0 6px rgba(255, 122, 26, 0.75), 0 0 14px rgba(255, 122, 26, 0.35);
+}
+
+
+/* A mask tool open: the bottom panel's sliders masks don't have, and groups with none, greyed out. */
+.vslider-off {
+  opacity: 0.25;
+  pointer-events: none;
+}
+.panel__group--off {
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+
+/* Combined masks: Add / Subtract, the kinds to choose, the parts as chips; parts drawn dashed. */
+.gradientbar__parts {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.gradientbar__kinds {
+  display: inline-flex;
+  gap: 4px;
+  padding-left: 4px;
+  border-left: 1px solid rgba(62, 230, 255, 0.35);
+}
+.gradientbar__part {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 2px 1px 7px;
+  border: 1px solid rgba(62, 230, 255, 0.5);
+  border-radius: 10px;
+  color: #3ee6ff;
+  font-size: 11px;
+}
+.gradientbar__part--subtract {
+  border-color: rgba(255, 122, 26, 0.7);
+  color: rgb(255, 150, 70);
+}
+.gradientbar__part button {
+  padding: 1px;
+  border: 0;
+  background: none;
+  color: inherit;
+}
+.gradient-part {
+  fill: none;
+  stroke: #3ee6ff;
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+  pointer-events: none;
+}
+.gradient-part--subtract {
+  stroke: rgb(255, 122, 26);
+}
+
+
+/* A combined mask's part pins and handles (cyan added, orange taken away). */
+.gradient-pin--part {
+  fill: #0b0b0b;
+  stroke: #3ee6ff;
+  stroke-width: 2;
+  cursor: move;
+}
+.gradient-pin--part.gradient-pin--subtract {
+  stroke: rgb(255, 122, 26);
+}
+.gradient-pin--part.is-on {
+  fill: #3ee6ff;
+}
+.gradient-pin--part.gradient-pin--subtract.is-on {
+  fill: rgb(255, 122, 26);
+}
+
+
+/* Feather handles (round): a linear's lines closer / further apart, a radial's soft edge. */
+.gradient-handle--feather {
+  cursor: nesw-resize;
+}
+.gradientbar__part {
+  cursor: pointer;
+}
+.gradientbar__part.is-on {
+  background: rgba(62, 230, 255, 0.18);
+}
+.gradientbar__part--subtract.is-on {
+  background: rgba(255, 122, 26, 0.18);
+}
+
+
+/* A linear's middle line, wide enough to grab: slides where the effect is half. */
+.gradient-midhit {
+  stroke: transparent;
+  stroke-width: 14;
+  pointer-events: stroke;
+  cursor: ns-resize;
+}
+
+
+/* A linear's middle handle: the lines apart or together. */
+.gradient-handle--mid {
+  fill: #3ee6ff;
+  cursor: ns-resize;
+}
+
+
+/* The masks' layers (top right of the photo): each mask, its own shape, its + / − shapes. */
+.masklayers {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 6;
+  width: 190px;
+  max-height: calc(100% - 90px);
+  overflow-y: auto;
+  padding: 6px;
+  background: #000;
+  border: 1px solid rgb(255, 122, 26);
+  border-radius: 4px;
+  color: #3ee6ff;
+  font-size: 12px;
+  pointer-events: auto;
+}
+.masklayers__title {
+  padding: 2px 4px 6px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+.masklayers__mask {
+  margin-bottom: 4px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+}
+.masklayers__mask.is-on {
+  border-color: rgba(62, 230, 255, 0.45);
+}
+.masklayers__row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 4px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.masklayers__row:hover {
+  color: rgb(255, 122, 26);
+}
+.masklayers__row--mask {
+  font-weight: 600;
+}
+.masklayers__name {
+  flex: 1;
+}
+.masklayers__row--part {
+  padding-left: 14px;
+  opacity: 0.85;
+}
+.masklayers__row--part.is-on {
+  background: rgba(62, 230, 255, 0.18);
+  opacity: 1;
+}
+.masklayers__row--subtract {
+  color: rgb(255, 122, 26);
+}
+.masklayers__row--subtract.is-on {
+  background: rgba(255, 122, 26, 0.18);
+}
+.masklayers__sign {
+  width: 8px;
+  text-align: center;
+}
+.masklayers__row button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid rgba(62, 230, 255, 0.4);
+  border-radius: 3px;
+  color: #3ee6ff;
+  cursor: pointer;
+}
+.masklayers__row button:hover,
+.masklayers__row button.is-on {
+  border-color: rgb(255, 122, 26);
+  color: rgb(255, 122, 26);
+}
+.masklayers__row--part .masklayers__x {
+  margin-left: auto;
+}
+.masklayers__row .masklayers__x {
+  border-color: transparent;
+  color: #ff4d4d;
+}
+.masklayers__kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 3px 4px 5px 14px;
+}
+.masklayers__kinds button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  background: transparent;
+  border: 1px solid rgba(62, 230, 255, 0.5);
+  border-radius: 3px;
+  color: #3ee6ff;
+  font: inherit;
+  cursor: pointer;
+}
+.masklayers__kinds button:hover {
+  border-color: rgb(255, 122, 26);
+  color: rgb(255, 122, 26);
+}
+
+
+/* Masks: the types for a new layer, at the top of the layers. */
+.masklayers__new {
+  display: flex;
+  gap: 4px;
+  padding: 0 4px 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid rgba(62, 230, 255, 0.25);
+}
+.masklayers__new button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 26px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid rgba(62, 230, 255, 0.5);
+  border-radius: 3px;
+  color: #3ee6ff;
+  cursor: pointer;
+}
+.masklayers__new button:hover,
+.masklayers__new button.is-on {
+  border-color: rgb(255, 122, 26);
+  color: rgb(255, 122, 26);
+}
+
+
+/* A layer's eye: its effect on or off. */
+.masklayers__row button.masklayers__eye {
+  border-color: transparent;
+}
+.masklayers__row button.masklayers__eye.is-off {
+  color: rgba(62, 230, 255, 0.4);
+}
+.masklayers__name.is-off {
+  opacity: 0.45;
+}
+
+
+/* A + / − shape's invert, pushed right with its ×. */
+.masklayers__row--part .masklayers__inv {
+  margin-left: auto;
+}
+.masklayers__row--part .masklayers__inv + .masklayers__x {
+  margin-left: 0;
+}
+
+
+/* Horizontal sliders (mask Feather, brush, Straighten, Legacy vignette, Library size): the panel
+   sliders' look, a thin track, fill orange up / cyan down, the white hexagon thumb. */
+.hslider {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  height: 18px;
+  padding: 0 7px;
+  cursor: ew-resize;
+  touch-action: none;
+}
+.hslider__track {
+  position: relative;
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: #1a4552;
+}
+.hslider__fill {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-radius: 2px;
+  background: #3ee6ff;
+}
+.hslider__fill--plus {
+  background: rgb(255, 122, 26);
+}
+.hslider__thumb {
+  position: absolute;
+  top: 50%;
+  margin-left: -7px;
+  margin-top: -6px;
+}
+.hslider__thumb polygon {
+  fill: var(--thumb-fill, #ffffff);
+  stroke: var(--thumb-fill, #ffffff);
+  stroke-width: 2;
+}
+.hslider:hover .hslider__thumb {
+  --thumb-fill: rgb(255, 122, 26);
+}
+
+
+/* The home screen's last line: Buy the developer, Chris a (coffee icon), in the prompt's font. */
+.terminal__coffee {
+  all: unset;
+  cursor: pointer;
+  align-self: flex-start;
+  white-space: pre;
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  margin-top: 18px;
+  padding: 2px 11px;
+  font-size: 12px;
+  color: rgba(190, 246, 255, 0.55);
+}
+.terminal__coffee svg {
+  color: rgb(255, 150, 70);
+  filter: drop-shadow(0 0 6px rgba(255, 122, 26, 0.8));
+}
+
+.terminal__coffee:hover,
+.terminal__coffee:focus-visible {
+  color: rgb(255, 150, 70);
+  text-shadow: 0 0 8px rgba(255, 122, 26, 0.9);
+}
+
+
+/* The title bar's About button, top left. */
+/* About and Learn, top left. */
+.titlebar__links {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  gap: 6px;
+}
+.titlebar__about {
+  padding: 2px 10px;
+  background: none;
+  border: 1px solid rgba(62, 230, 255, 0.35);
+  border-radius: 3px;
+  color: #3ee6ff;
+  font-family: "Exo 2", system-ui, sans-serif;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+/* Retouch's status line: centred in the space between the title and the window buttons. */
+.titlebar__status {
+  /* From the title's right edge (it's ~140px wide, centred) to the window buttons (3 x 40px). */
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(50% + 70px);
+  right: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-family: "Exo 2", system-ui, sans-serif;
+  font-size: 11px;
+  color: #3ee6ff;
+  pointer-events: none;
+}
+/* Retouch's line itself (its own box): centred there, cut short with "..." when long. */
+.titlebar__status > * {
+  max-width: calc(100% - 24px);
+  min-width: 0;
+  justify-content: center;
+  pointer-events: auto;
+}
+
+/* The folder being read (Edit's scan): right of About, a short loading bar and the count. */
+.titlebar__scan {
+  position: absolute;
+  /* Right of About and Learn. */
+  left: 174px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: "Exo 2", system-ui, sans-serif;
+  font-size: 11px;
+  /* A fifth of the title bar's width, the bar stretching to fill it; a long label is cut short. */
+  width: 20%;
+  pointer-events: none;
+}
+
+.titlebar__scan .handback-progress__bar {
+  flex: 1;
+  min-width: 40px;
+}
+
+.titlebar__scan-label {
+  flex: 0 1 auto;
+  max-width: 50%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #8a8b96;
+}
+
+.titlebar__scan-count {
+  flex: none;
+}
+
+.titlebar__scan-count {
+  color: #3ee6ff;
+  font-variant-numeric: tabular-nums;
+}
+
+.titlebar__about:hover {
+  border-color: rgb(255, 122, 26);
+  color: rgb(255, 122, 26);
+}
+.titlebar__learn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.titlebar__play {
+  display: block;
+}
+
+/* About: as RapidRetouch's (Chris's photo left, the text right), Tron style. */
+.about-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.65);
+  cursor: default;
+}
+.about-box {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  width: min(1040px, 92vw);
+  height: min(720px, 88vh);
+  overflow: hidden;
+  border: 1px solid rgba(62, 230, 255, 0.4);
+  border-radius: 10px;
+  background: #101010;
+  box-shadow: 0 0 22px rgba(62, 230, 255, 0.16), inset 0 0 14px rgba(62, 230, 255, 0.05);
+  font-family: "Exo 2", system-ui, sans-serif;
+  font-size: 13px;
+  color: #d8d8de;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.about-box__close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 1;
+  display: inline-flex;
+  padding: 4px;
+  background: none;
+  border: none;
+  color: #ff4d4d;
+  cursor: pointer;
+}
+.about-box__close:hover {
+  color: #ff8080;
+}
+.about-box__photo {
+  position: relative;
+  min-height: 0;
+  background: #14151a;
+}
+.about-box__photo img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 30%;
+}
+.about-box__watermark {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 22px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 300;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.82);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.about-box__text {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 26px 16px;
+}
+.about-box h2 {
+  margin: 0 0 6px;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #3ee6ff;
+  text-shadow: 0 0 8px rgba(62, 230, 255, 0.4);
+}
+.about-box__version {
+  font-size: 12px;
+  font-weight: 400;
+  opacity: 0.7;
+}
+.about-box h3 {
+  margin: 16px 0 4px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgb(255, 122, 26);
+}
+.about-box h4 {
+  margin: 8px 0 3px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #3ee6ff;
+  opacity: 0.8;
+}
+.about-box p {
+  margin: 0 0 6px;
+  line-height: 1.38;
+}
+.about-box a {
+  color: #3ee6ff;
+  text-decoration: none;
+}
+.about-box a:hover {
+  color: rgb(255, 122, 26);
+}
+.about-box__links {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 4px;
+}
+.about-box__links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.about-box__part {
+  padding-top: 2px;
+  border-top: 1px solid rgba(62, 230, 255, 0.15);
+  margin-top: 10px;
+}
+.about-box__group ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.about-box__group li {
+  margin-bottom: 4px;
+  line-height: 1.3;
+}
+.about-box__licence {
+  margin-left: 4px;
+  font-size: 11px;
+  color: rgb(255, 150, 70);
+}
+.about-box__small {
+  color: #9a9a9a;
+  font-size: 12px;
+}
+.about-box__coffee {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid rgba(62, 230, 255, 0.25);
+  border-radius: 8px;
+  background: rgba(62, 230, 255, 0.05);
+}
+.about-box__coffee button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  background: none;
+  border: 1px solid rgb(255, 122, 26);
+  border-radius: 4px;
+  color: #3ee6ff;
+  font: inherit;
+  cursor: pointer;
+}
+.about-box__coffee button:hover {
+  color: rgb(255, 122, 26);
+}
+
+/* Lens corrections: one small panel under the Lens button. Black, Tron-orange stroke, cyan text. */
+.lensmenu__pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 340px;
+  padding: 10px 12px;
+  background: #000;
+  border: 1px solid rgb(255, 122, 26);
+  border-radius: 6px;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.6);
+  font-family: "Exo 2", system-ui, sans-serif;
+  font-size: 12px;
+  color: #3ee6ff;
+}
+.lensmenu__on {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.lensmenu__on input {
+  display: none;
+}
+.toggle--on {
+  border-color: #3ee6ff;
+  background: rgba(62, 230, 255, 0.25);
+  box-shadow: 0 0 6px rgba(62, 230, 255, 0.45);
+}
+.toggle--on .toggle__knob {
+  left: 16px;
+  background: #3ee6ff;
+}
+.lensmenu__lens {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: #b9bac4;
+}
+.lensmenu__lens button,
+.lensmenu__scope button {
+  padding: 2px 7px;
+  background: none;
+  border: 1px solid rgba(62, 230, 255, 0.4);
+  border-radius: 3px;
+  color: #3ee6ff;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.lensmenu__search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid rgba(62, 230, 255, 0.45);
+  border-radius: 4px;
+}
+.lensmenu__search input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  outline: none;
+  color: #e8e8ec;
+  font: inherit;
+}
+.lensmenu__hits {
+  display: flex;
+  flex-direction: column;
+}
+.lensmenu__hits button {
+  all: unset;
+  padding: 4px 8px;
+  border-radius: 3px;
+  color: #e8e8ec;
+  cursor: pointer;
+}
+.lensmenu__hits button:hover,
+.lensmenu__hits button.is-current {
+  background: rgba(62, 230, 255, 0.14);
+  color: rgb(255, 150, 70);
+}
+.lensmenu__scope {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(62, 230, 255, 0.2);
+  color: #8a8b96;
+}
+.lensmenu__scope button.is-on {
+  border-color: rgb(255, 122, 26);
+  color: rgb(255, 122, 26);
+}
+.lensmenu__scope button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.lensmenu__lens button:hover,
+.lensmenu__scope button:not(:disabled):hover {
+  color: rgb(255, 122, 26);
+}
+.lensmenu__db {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0;
+  font-size: 11px;
+  color: #8a8b96;
+}
+.lensmenu__db button {
+  padding: 1px 6px;
+  background: none;
+  border: 1px solid rgba(62, 230, 255, 0.35);
+  border-radius: 3px;
+  color: #3ee6ff;
+  font: inherit;
+  cursor: pointer;
+}
+.lensmenu__db button:hover:not(:disabled) {
+  color: rgb(255, 122, 26);
+}
+.lensmenu__photo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 0;
+  border-top: 1px solid rgba(62, 230, 255, 0.2);
+}
+.lensmenu__lens {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  color: #e8e8ec;
+}
+.lensmenu__note {
+  margin: 0;
+  font-size: 11px;
+  color: #8a8b96;
+}
+.lensmenu__on--small {
+  flex-shrink: 0;
+  font-size: 11px;
+}
+.lensmenu__search button,
+.lensmenu__load {
+  padding: 2px 7px;
+  background: none;
+  border: 1px solid rgba(62, 230, 255, 0.4);
+  border-radius: 3px;
+  color: #3ee6ff;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.lensmenu__load {
+  align-self: flex-start;
+}
+.lensmenu__search button:hover,
+.lensmenu__load:hover {
+  color: rgb(255, 122, 26);
+  border-color: rgb(255, 122, 26);
+}
+
+.lensmenu__missing {
+  color: rgb(255, 122, 26);
+}
+.lensmenu__on.is-disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* The panel's two tick boxes (Names, D65 Glow; Show mask, Invert with a mask tool open): a slim row on
+   the loupe's bottom edge, just above the panel, at its left. */
+.panel__options.panel__options--float {
+  position: absolute;
+  left: 10px;
+  bottom: calc(100% + 4px);
+  z-index: 6;
+  flex-direction: row;
+  align-items: center;
+  gap: 14px;
+  padding: 2px 8px;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 4px;
+  font-size: 11px;
+}
+/* The layers panel's header: "Masks", and the Show mask switch at its right. */
+.masklayers__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  /* Dimmed by colour, not opacity, so the Show mask switch beside it stays bright. */
+  opacity: 1;
+  color: rgba(62, 230, 255, 0.7);
+}
+.masklayers__show {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11px;
+  color: #3ee6ff;
+  opacity: 1;
+  cursor: pointer;
+}
+.masklayers__show input {
+  margin: 0;
+  accent-color: #3ee6ff;
+}
+/* The legacy vignette's switch: an orange ring while the photo has a legacy vignette set. */
+.mini-btn.mini-btn--used:not(.mini-btn--on) {
+  box-shadow: 0 0 0 1px rgb(255, 122, 26);
+}
+
+/* The loupe's zoom in the top bar: Fit, and the percentage as a dropdown. */
+.topbar__zoom {
+  display: inline-flex;
+}
+.topbar__zoomctl {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.topbar__zoomsel {
+  padding: 3px 4px;
+  border: 1px solid #1a4552;
+  border-radius: 4px;
+  background: #0b0b0b;
+  color: #e8e8ec;
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+/* A gap after Lens, before the working-folder button. */
+.topbar .lensmenu {
+  margin-right: 14px;
+}
+
+/* Plugins: a gap either side in the top bar; its menu keeps its one button on a line. */
+.topbar .pluginmenu {
+  margin: 0 14px;
+}
+.pluginmenu .copypaste__menu .autostyle__train {
+  width: auto;
+  white-space: nowrap;
+}
+
+/* The Patch tool (PatchOverlay): each patch's area (cyan), the picked one's source (orange), pins. */
+.patch-layer {
+  cursor: crosshair;
+}
+.patch-svg {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+.patch-area {
+  fill: rgba(62, 230, 255, 0.06);
+  stroke: rgba(62, 230, 255, 0.6);
+  stroke-width: 1.2;
+  stroke-dasharray: 5 4;
+}
+.patch-area--on {
+  fill: rgba(62, 230, 255, 0.12);
+  stroke: #3ee6ff;
+  stroke-width: 1.6;
+}
+.patch-source {
+  fill: rgba(255, 122, 26, 0.1);
+  stroke: rgb(255, 122, 26);
+  stroke-width: 1.6;
+  stroke-dasharray: 5 4;
+}
+.patch-pin {
+  fill: #0b0b0b;
+  stroke: #3ee6ff;
+  stroke-width: 1.5;
+}
+.patch-pin--on {
+  fill: #3ee6ff;
+}
+
+/* Patch's Feather (Clone): a short slider and its value in the toolbar. */
+.patchbar__feather {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #b7b8c2;
+}
+.removebar .patchbar__feather input {
+  /* Not the bar's wide text box (.removebar input). */
+  width: 90px;
+  flex: none;
+  padding: 0;
+  border: none;
+  background: none;
+  accent-color: #3ee6ff;
+}
+.patchbar__value {
+  min-width: 28px;
+  color: #3ee6ff;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A floating bar's grip (floatingBar.tsx): Crop, Remove, Patch, the Masks box and its bar. */
+.cropbar__grip {
+  align-items: center;
+  touch-action: none;
+}
+.cropbar__grip:hover {
+  color: rgb(255, 122, 26);
+}
+.masklayers__name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
