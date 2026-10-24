@@ -1,8 +1,11 @@
 # RapidOne – RAW Editor for the future
 
 A RAW photo editor for working photographers: cull, edit and retouch a whole shoot in one
-app, entirely on your own computer. No uploads, no accounts, no subscription. Edits are
-non-destructive and the RAW files are never changed.
+app, entirely on your own computer. Aftershoot-style AI editing that learns your style,
+Evoto-style AI portrait retouching, and its own RAW engine. No uploads, no accounts. Edits
+are non-destructive and the RAW files are never changed.
+
+[![Buy me a coffee](https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=%E2%98%95&slug=chriscorkphotography&button_colour=FFDD00&font_colour=000000&font_family=Poppins&outline_colour=000000&coffee_colour=ffffff)](https://buymeacoffee.com/chriscorkphotography)
 
 Part of a family of apps by Chris Cork Photography: RapidOne brings
 [RapidCulling](https://github.com/crispin81/RapidCulling) and
@@ -13,6 +16,15 @@ Part of a family of apps by Chris Cork Photography: RapidOne brings
 **New to RapidOne? Watch the videos:**
 
 [![RapidOne videos](docs/tutorial-thumbnail.jpg)](https://www.youtube.com/playlist?list=PLC5lWfy1MHI8)
+
+<details>
+<summary><strong>Recent Changes</strong></summary>
+
+**[⬇ Download the latest version](https://github.com/crispin81/RapidOne/releases/latest)**
+
+- **2026-10-24 (v1.0.0):** First release, for Linux: Cull, Edit and Retouch in one app, RapidOne's own RAW engine, Aftershoot-style AI editing that learns your style, Evoto-style retouching, masks, AI Erase, Patch, AI Denoise and Lightroom XMP support
+
+</details>
 
 ## Download
 
@@ -93,18 +105,18 @@ Three tabs, one folder of photos:
   - AI Denoise, also "Denoise all" for every photo above a chosen ISO.
   - Lightroom compatible: reads Lightroom and Aftershoot XMP edits, including crops and
     gradients, and uses Adobe's camera profiles if you add your own.
-  - Teach a look: learn your white balance and exposure from your own edited photos, then
-    apply your style to a whole shoot. Presets, copy/paste and before/after.
+  - Aftershoot-style AI editing: it learns your white balance, exposure and look from photos
+    you've already edited, then edits a whole shoot evenly in your style. Presets,
+    copy/paste and before/after.
   - Export to JPEG or 16-bit TIFF, full size or scaled, with export presets.
-- **Retouch**: AI-assisted portrait retouching (from RapidRetouch): skin, eyes, mouth,
-  backdrop, dodge & burn and more, on the edited photo.
+- **Retouch**: Evoto-style AI portrait retouching (from RapidRetouch): skin, blemishes,
+  wrinkles, eyes, teeth, backdrop, dodge & burn and more, as sliders on the edited photo.
 
 Photos never leave your computer.
 
 ## AI models
 
-Only permissively licensed models are used, because the people using this do paid client
-work. Edit's models come in the download.
+Only permissively licensed models are used. Edit's models come in the download.
 
 | Model | Used for | Licence |
 |---|---|---|
@@ -130,5 +142,8 @@ Retouch's models are listed in [RapidRetouch](https://github.com/crispin81/Rapid
 
 Lens data from [Lensfun](https://lensfun.github.io/) (CC BY-SA 3.0).
 
-If you find it useful: [buy me a coffee](https://buymeacoffee.com/chriscorkphotography).
-· [chriscorkphotography.co.uk](https://www.chriscorkphotography.co.uk)
+If you find it useful, you can buy me a coffee:
+
+[![Buy me a coffee](https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=%E2%98%95&slug=chriscorkphotography&button_colour=FFDD00&font_colour=000000&font_family=Poppins&outline_colour=000000&coffee_colour=ffffff)](https://buymeacoffee.com/chriscorkphotography)
+
+[chriscorkphotography.co.uk](https://www.chriscorkphotography.co.uk/rapidone-raw-editor-linux)
