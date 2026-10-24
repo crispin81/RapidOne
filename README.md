@@ -5,7 +5,6 @@ app, entirely on your own computer. Aftershoot-style AI editing that learns your
 Evoto-style AI portrait retouching, and its own RAW engine. No uploads, no accounts. Edits
 are non-destructive and the RAW files are never changed.
 
-[![Buy me a coffee](https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=%E2%98%95&slug=chriscorkphotography&button_colour=FFDD00&font_colour=000000&font_family=Poppins&outline_colour=000000&coffee_colour=ffffff)](https://buymeacoffee.com/chriscorkphotography)
 
 Part of a family of apps by Chris Cork Photography: RapidOne brings
 [RapidCulling](https://github.com/crispin81/RapidCulling) and
