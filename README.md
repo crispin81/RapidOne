@@ -32,10 +32,10 @@ Part of a family of apps by Chris Cork Photography: RapidOne brings
 
 | | |
 |---|---|
-| **Linux** | [![AppImage](https://img.shields.io/badge/AppImage-0a8fa6?style=for-the-badge)](https://github.com/crispin81/RapidOne/releases/latest/download/RapidOne_linux_x86_64.AppImage) [![.deb](https://img.shields.io/badge/.deb-0a8fa6?style=for-the-badge)](https://github.com/crispin81/RapidOne/releases/latest/download/RapidOne_linux_amd64.deb)<br>AppImage: any recent distribution · .deb: Ubuntu, Mint, Pop!_OS, Debian |
-| **Windows** (10 and 11, 64-bit) | [![Setup .exe](https://img.shields.io/badge/Setup%20.exe-0a8fa6?style=for-the-badge)](https://github.com/crispin81/RapidOne/releases/latest/download/RapidOne_windows_x64_setup.exe) [![.msi](https://img.shields.io/badge/.msi-0a8fa6?style=for-the-badge)](https://github.com/crispin81/RapidOne/releases/latest/download/RapidOne_windows_x64.msi) |
+| **Linux** | [![AppImage](https://img.shields.io/badge/AppImage-3ee6ff?style=for-the-badge)](https://github.com/crispin81/RapidOne/releases/latest/download/RapidOne_linux_x86_64.AppImage) [![.deb](https://img.shields.io/badge/.deb-3ee6ff?style=for-the-badge)](https://github.com/crispin81/RapidOne/releases/latest/download/RapidOne_linux_amd64.deb)<br>AppImage: any recent distribution · .deb: Ubuntu, Mint, Pop!_OS, Debian |
+| **Windows** (10 and 11, 64-bit) | [![Setup .exe](https://img.shields.io/badge/Setup%20.exe-3ee6ff?style=for-the-badge)](https://github.com/crispin81/RapidOne/releases/latest/download/RapidOne_windows_x64_setup.exe) [![.msi](https://img.shields.io/badge/.msi-3ee6ff?style=for-the-badge)](https://github.com/crispin81/RapidOne/releases/latest/download/RapidOne_windows_x64.msi) |
 | **Mac** (Apple Silicon) | Coming soon |
-| **Android** (RapidCull, phone culling) | [![APK](https://img.shields.io/badge/APK-0a8fa6?style=for-the-badge)](https://github.com/crispin81/RapidOne/releases/latest/download/RapidCull_android.apk) |
+| **Android** (RapidCull, phone culling) | [![APK](https://img.shields.io/badge/APK-3ee6ff?style=for-the-badge)](https://github.com/crispin81/RapidOne/releases/latest/download/RapidCull_android.apk) |
 
 ## Installing on Linux
 
