@@ -21,6 +21,7 @@ Part of a family of apps by Chris Cork Photography: RapidOne brings
 
 **[⬇ Download the latest version](https://github.com/crispin81/RapidOne/releases/latest)**
 
+- **2026-10-25 (v1.0.0):** Now on Windows (10 and 11, 64-bit): a setup .exe and an .msi. And RapidCull for Android: cull on your phone, offline too, synced with RapidOne
 - **2026-10-24 (v1.0.0):** First release, for Linux: Cull, Edit and Retouch in one app, RapidOne's own RAW engine, Aftershoot-style AI editing that learns your style, Evoto-style retouching, masks, AI Erase, Patch, AI Denoise and Lightroom XMP support
 
 </details>
@@ -32,8 +33,9 @@ Part of a family of apps by Chris Cork Photography: RapidOne brings
 | | |
 |---|---|
 | **Linux** | [AppImage](https://github.com/crispin81/RapidOne/releases/latest/download/RapidOne_linux_x86_64.AppImage) (any recent distribution) · [.deb](https://github.com/crispin81/RapidOne/releases/latest/download/RapidOne_linux_amd64.deb) (Ubuntu, Mint, Pop!_OS, Debian) |
-| **Windows** | Coming soon |
+| **Windows** (10 and 11, 64-bit) | [Setup .exe](https://github.com/crispin81/RapidOne/releases/latest/download/RapidOne_windows_x64_setup.exe) · [.msi](https://github.com/crispin81/RapidOne/releases/latest/download/RapidOne_windows_x64.msi) |
 | **Mac** (Apple Silicon) | Coming soon |
+| **Android** (RapidCull, phone culling) | [.apk](https://github.com/crispin81/RapidOne/releases/latest/download/RapidCull_android.apk) |
 
 ## Installing on Linux
 
@@ -80,19 +82,40 @@ blocking it. Allow ports 47811–47850 on your home network, for example with uf
 sudo ufw allow from 192.168.0.0/16 to any port 47811:47850 proto tcp
 ```
 
-**First time you open Retouch**, it downloads its AI engine once (about 3 GB with an NVIDIA
-graphics card, about 1 GB otherwise) and shows its progress. Edit's AI tools are already
-in the download and work offline straight away.
+**First time you open Retouch**, it downloads its AI engine once (about 1 GB) and shows
+its progress. Edit's AI tools are already in the download and work offline straight away.
 
 These builds aren't code-signed yet, so your system may warn that the publisher is
 unverified. That's expected, not a sign anything's wrong.
+
+## Installing on Windows
+
+Works on Windows 10 and 11 (64-bit). Run the **setup .exe** (or the **.msi**, if you prefer
+it or install software for several people).
+
+The installer isn't code-signed yet, so Windows may show **"Windows protected your PC"**.
+Click **More info**, then **Run anyway**.
+
+**First time you open Retouch**, it downloads its AI engine once (about 1 GB) and shows its
+progress. Edit's AI tools are already in the download and work offline straight away.
+
+**Culling from your phone:** if your phone can't find the computer, allow RapidOne through
+Windows Firewall when Windows asks, on private (home) networks.
+
+## RapidCull for Android
+
+Download the .apk on your phone and open it. Android asks you to allow installs from your
+browser or file app the first time (it isn't from the Play Store). Then, in RapidOne, open
+**Cull**, click **Phone** and scan the QR code from the app to pair them. On the same Wi-Fi the
+app downloads folders to cull offline and syncs your stars and picks both ways.
 
 ## What it does
 
 Three tabs, one folder of photos:
 
 - **Cull**: pick and rate a shoot fast, with near-duplicates grouped (from RapidCulling),
-  and cull from your phone on the same Wi-Fi.
+  and cull from your phone on the same Wi-Fi: in its browser, or in the RapidCull Android app,
+  which downloads folders to cull offline and syncs your ratings back.
 - **Edit**: RapidOne's own RAW engine.
   - White balance, tone (Exposure, Contrast, Highlights, Shadows, Whites, Blacks),
     Texture, Clarity, Dehaze, Vibrance, Saturation, tone curves, colour Mixer, colour
