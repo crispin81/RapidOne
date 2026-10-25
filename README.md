@@ -18,7 +18,7 @@ Part of a family of apps by Chris Cork Photography: RapidOne brings
 
 **New to RapidOne? Watch the videos:**
 
-[![RapidOne videos](docs/tutorial-thumbnail.jpg)](https://www.youtube.com/playlist?list=PLC5lWfy1MHI8)
+[![I Built a Free Lightroom Alternative for the Future (Linux, Mac & Windows)](https://img.youtube.com/vi/-kDEFfUwWlI/maxresdefault.jpg)](https://www.youtube.com/watch?v=-kDEFfUwWlI&list=PLC5lWfy1MHI8)
 
 <details>
 <summary><strong>Recent Changes</strong></summary>
