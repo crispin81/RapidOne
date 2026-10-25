@@ -18,7 +18,7 @@ Part of a family of apps by Chris Cork Photography: RapidOne brings
 
 **New to RapidOne? Watch the videos:**
 
-[![I Built a Free Lightroom Alternative for the Future (Linux, Mac & Windows)](https://img.youtube.com/vi/-kDEFfUwWlI/maxresdefault.jpg)](https://www.youtube.com/watch?v=-kDEFfUwWlI&list=PLC5lWfy1MHI8)
+[![I Built a Free Lightroom Alternative for the Future (Linux, Mac & Windows)](docs/video-thumbnail.jpg)](https://www.youtube.com/watch?v=-kDEFfUwWlI&list=PLC5lWfy1MHI8)
 
 <details>
 <summary><strong>Recent Changes</strong></summary>
@@ -39,6 +39,7 @@ Part of a family of apps by Chris Cork Photography: RapidOne brings
 | **Linux** | [![AppImage](https://img.shields.io/badge/AppImage-3ee6ff?style=for-the-badge)](https://github.com/crispin81/RapidOne/releases/latest/download/RapidOne_linux_x86_64.AppImage) [![.deb](https://img.shields.io/badge/.deb-3ee6ff?style=for-the-badge)](https://github.com/crispin81/RapidOne/releases/latest/download/RapidOne_linux_amd64.deb)<br>AppImage: any recent distribution · .deb: Ubuntu, Mint, Pop!_OS, Debian |
 | **Windows** (10 and 11, 64-bit) | [![Setup .exe](https://img.shields.io/badge/Setup%20.exe-3ee6ff?style=for-the-badge)](https://github.com/crispin81/RapidOne/releases/latest/download/RapidOne_windows_x64_setup.exe) [![.msi](https://img.shields.io/badge/.msi-3ee6ff?style=for-the-badge)](https://github.com/crispin81/RapidOne/releases/latest/download/RapidOne_windows_x64.msi) |
 | **Mac** (Apple Silicon) | Coming soon |
+| **Meta VR glasses** | Coming soon |
 | **Android** (RapidCull, phone culling) | [![APK](https://img.shields.io/badge/APK-3ee6ff?style=for-the-badge)](https://github.com/crispin81/RapidOne/releases/latest/download/RapidCull_android.apk) |
 
 ## Installing on Linux
