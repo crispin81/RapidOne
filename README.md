@@ -1,3 +1,5 @@
+<p align="center"><img src="src-tauri/icons/rapidone-icon.svg" alt="RapidOne" width="128" height="128"></p>
+
 # RapidOne – RAW Editor for the future
 
 A RAW photo editor for working photographers: cull, edit and retouch a whole shoot in one
