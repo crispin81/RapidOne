@@ -169,6 +169,7 @@ Photos never leave your computer.
 - Liquify
 - Plugins: add your own tools
 - Defringe tool
+- RapidOne on Meta VR glasses
 
 **Future goals**
 
