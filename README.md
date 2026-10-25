@@ -7,6 +7,8 @@ app, entirely on your own computer. Aftershoot-style AI editing that learns your
 Evoto-style AI portrait retouching, and its own RAW engine. No uploads, no accounts. Edits
 are non-destructive and the RAW files are never changed.
 
+This isn't a free alternative to Lightroom, it's a better alternative to Lightroom that just happens to be free :)
+
 
 Part of a family of apps by Chris Cork Photography: RapidOne brings
 [RapidCulling](https://github.com/crispin81/RapidCulling) and
