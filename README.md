@@ -169,12 +169,12 @@ Photos never leave your computer.
 - Liquify
 - Plugins: add your own tools
 - Defringe tool
-- RapidOne on Meta VR glasses
 
 **Future goals**
 
 - Astro mode, with stacking and stretching
 - Timelapse rendering with keyframes
+- RapidOne on Meta VR glasses
 
 ## AI models
 
