@@ -25,6 +25,7 @@ Part of a family of apps by Chris Cork Photography: RapidOne brings
 
 **[⬇ Download the latest version](https://github.com/crispin81/RapidOne/releases/latest)**
 
+- **2026-10-25 (v1.0.0):** Now on Mac (Apple Silicon): a .dmg, with AI Denoise on the Mac's graphics
 - **2026-10-25 (v1.0.0):** Now on Windows (10 and 11, 64-bit): a setup .exe and an .msi. And RapidCull for Android: cull on your phone, offline too, synced with RapidOne
 - **2026-10-24 (v1.0.0):** First release, for Linux: Cull, Edit and Retouch in one app, RapidOne's own RAW engine, Aftershoot-style AI editing that learns your style, Evoto-style retouching, masks, AI Erase, Patch, AI Denoise and Lightroom XMP support
 
@@ -38,7 +39,7 @@ Part of a family of apps by Chris Cork Photography: RapidOne brings
 |---|---|
 | **Linux** | [![AppImage](https://img.shields.io/badge/AppImage-3ee6ff?style=for-the-badge)](https://github.com/crispin81/RapidOne/releases/latest/download/RapidOne_linux_x86_64.AppImage) [![.deb](https://img.shields.io/badge/.deb-3ee6ff?style=for-the-badge)](https://github.com/crispin81/RapidOne/releases/latest/download/RapidOne_linux_amd64.deb)<br>AppImage: any recent distribution · .deb: Ubuntu, Mint, Pop!_OS, Debian |
 | **Windows** (10 and 11, 64-bit) | [![Setup .exe](https://img.shields.io/badge/Setup%20.exe-3ee6ff?style=for-the-badge)](https://github.com/crispin81/RapidOne/releases/latest/download/RapidOne_windows_x64_setup.exe) [![.msi](https://img.shields.io/badge/.msi-3ee6ff?style=for-the-badge)](https://github.com/crispin81/RapidOne/releases/latest/download/RapidOne_windows_x64.msi) |
-| **Mac** (Apple Silicon) | Coming soon |
+| **Mac** (Apple Silicon, macOS 13 Ventura or later) | [![.dmg](https://img.shields.io/badge/.dmg-3ee6ff?style=for-the-badge)](https://github.com/crispin81/RapidOne/releases/latest/download/RapidOne_mac_apple_silicon.dmg) |
 | **Meta VR glasses** | Coming soon |
 | **Android** (RapidCull, phone culling) | [![APK](https://img.shields.io/badge/APK-3ee6ff?style=for-the-badge)](https://github.com/crispin81/RapidOne/releases/latest/download/RapidCull_android.apk) |
 
@@ -107,6 +108,22 @@ progress. Edit's AI tools are already in the download and work offline straight 
 **Culling from your phone:** if your phone can't find the computer, allow RapidOne through
 Windows Firewall when Windows asks, on private (home) networks.
 
+## Installing on Mac
+
+Works on Apple Silicon Macs (M1 and later) with macOS 13 Ventura or later. Open the **.dmg** and
+drag **RapidOne** into **Applications**.
+
+The app isn't signed by Apple yet, so the first time you open it macOS says it can't verify it.
+Click **Done**, then open **System Settings → Privacy & Security**, scroll down and click
+**Open Anyway** next to RapidOne. You only need to do this once. Or, in Terminal:
+
+```
+xattr -d com.apple.quarantine /Applications/RapidOne.app
+```
+
+**First time you open Retouch**, it downloads its AI engine once (about 1 GB) and shows its
+progress. Edit's AI tools are already in the download and work offline straight away.
+
 ## RapidCull for Android
 
 Download the .apk on your phone and open it. Android asks you to allow installs from your
@@ -140,6 +157,23 @@ Three tabs, one folder of photos:
   wrinkles, eyes, teeth, backdrop, dodge & burn and more, as sliders on the edited photo.
 
 Photos never leave your computer.
+
+## Roadmap
+
+**Coming next**
+
+- GPU optimisation
+- Multi-face detection in Retouch
+- Stray hair removal
+- Faster Flatten backdrop
+- Liquify
+- Plugins: add your own tools
+- Defringe tool
+
+**Future goals**
+
+- Astro mode, with stacking and stretching
+- Timelapse rendering with keyframes
 
 ## AI models
 
