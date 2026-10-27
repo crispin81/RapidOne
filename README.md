@@ -163,10 +163,8 @@ Photos never leave your computer.
 
 **Coming next**
 
-- GPU optimisation
 - Multi-face detection in Retouch
 - Stray hair removal
-- Faster Flatten backdrop
 - Liquify
 - Plugins: add your own tools
 - Defringe tool
