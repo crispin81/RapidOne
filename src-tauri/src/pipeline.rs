@@ -171,10 +171,10 @@ const MID_GREY_OUT: f32 = 0.184;
 
 pub struct ToneCurve {
     /// Scales scene light into the curve so mid-grey lands on MID_GREY_OUT.
-    pre_gain: f32,
-    k: [f32; 5],
+    pub(crate) pre_gain: f32,
+    pub(crate) k: [f32; 5],
     /// All-zero parameters: the curve changes nothing (the "As is" profile).
-    identity: bool,
+    pub(crate) identity: bool,
 }
 
 impl ToneCurve {
@@ -718,7 +718,7 @@ pub struct Tuning {
     /// 2 = the same on linear ProPhoto channels; 3 = each linear ProPhoto
     /// channel through the curve on its own (Adobe Color: refitted on the
     /// contrast, tone2 and combo kits, 70.9% vs 70.8% for a luminance refit;
-    /// real edits 4.58 -> 4.53, contrast kit 3.10 -> 2.82, brownies flash 3.71
+    /// real edits 4.58 -> 4.53, contrast kit 3.10 -> 2.82, food flash 3.71
     /// -> 3.54 but indoor 2.57 -> 2.90). Shinobi Standard keeps 0 (45.6% vs 49.4%).
     pub contrast_rgb: f32,
     /// Contrast's colour change eases off for colours already strong: its
@@ -805,7 +805,7 @@ pub struct Tuning {
     /// 0 = the older fitted bands above (the default). The table wins on the
     /// single-slider kit (`RapidOne-calibration-tone2`: Shadows 0 -> 60%,
     /// Blacks 35 -> 80%, Chris's four together 43 -> 64%) but loses on Chris's
-    /// real presets (brownies 2.1-3.2 -> 3.1-5.6 dE), which add big Exposure
+    /// real presets (food 2.1-3.2 -> 3.1-5.6 dE), which add big Exposure
     /// moves and curves: it needs a kit of combinations before it's the default.
     pub tone_table: f32,
     /// Photo-adaptive strength for the bands (as measured on the tone kit):
@@ -888,7 +888,7 @@ pub struct Tuning {
     /// `shadows_global` x (1 - ramp(key, from, from + width)) (dark photos).
     /// Lightroom's Highlights -100 on brightened photos (combo kit, Exposure
     /// +1.4) darkened even the deep shadows 0.03-0.07 stops, and -85 on the
-    /// brownies indoor (+1.43) 0.1-0.3, with a tight spread (a global pull).
+    /// food indoor (+1.43) 0.1-0.3, with a tight spread (a global pull).
     /// Highlights' tail into the darks: below its centre the band's weight is
     /// at least `highlights_tail` x e^((pos - centre) / `highlights_tail_width`)
     /// (0 = the plain bell). Lightroom's Highlights -100 darkened the shadows of
@@ -897,7 +897,7 @@ pub struct Tuning {
     /// 1 = Highlights and Shadows as photo-adaptive global curves (no local
     /// part): measured per photo from Lightroom's exports (`slidercurve`, 102
     /// photo/amount pairs over the Standard, brightened, Adobe Color tone kits and
-    /// the brownies ladder), one curve shape each that Lightroom places and
+    /// the food ladder), one curve shape each that Lightroom places and
     /// scales from the photo's own brightness distribution. With a free
     /// position and strength per photo the photos agreed within 0.02-0.03 stops;
     /// this formula: Highlights - 0.086 rms (held-out set 0.077), Shadows + 0.067
@@ -915,7 +915,7 @@ pub struct Tuning {
     pub photo_stats: [f32; 4],
     /// Shadows' lift x (1 - this x max(0, -Highlights) / 100): in Lightroom a
     /// negative Highlights weakens Shadows (slider-mix kit: Highlights -85 cut
-    /// Shadows +44's lift in the darks about 40%; brownies ladder about 55%).
+    /// Shadows +44's lift in the darks about 40%; food ladder about 55%).
     pub shadows_highlights_link: f32,
     pub highlights_tail: f32,
     pub highlights_tail_width: f32,
@@ -1240,7 +1240,7 @@ impl Tuning {
             contrast_sat_soft: 0.06,
             highlights_plus: 1.6894,
             // Highlights - strengthened 2026-10-10 on the slider-mix and band-area
-            // kits (our pull on the brightest tones was ~1.7 L* short): brownies
+            // kits (our pull on the brightest tones was ~1.7 L* short): food
             // flash 2.71 -> 2.64, outdoor 2.19 -> 2.16, real edits 4.75 -> 4.73.
             highlights_minus: 1.594,
             highlights_centre: 3.1119,
@@ -1260,7 +1260,7 @@ impl Tuning {
             blacks_centre: -3.9476,
             blacks_width: 2.2235,
             // Placement refitted 2026-10-10 with the flash-faces kit (four flash
-            // photos, one slider at a time from the brownies drinks settings):
+            // photos, one slider at a time from the food drinks settings):
             // Lightroom places the bands by the photo's overall brightness about
             // twice as much as we had, so in a dark flash photo the lit faces count
             // as highlights (Shadows lifts them less, Highlights pulls them more).
@@ -1301,7 +1301,7 @@ impl Tuning {
             // Blacks keeps half the colour it would otherwise take with it (colour
             // kit, true Adobe Color: our warm colours were 81% of Lightroom's with
             // the tone sliders on, 93% without; Blacks -47 changed colour 1.5 in
-            // ours, 0.1 in Lightroom). Brownies 3.94/2.67/2.80 -> 3.68/2.48/2.44,
+            // ours, 0.1 in Lightroom). Food 3.94/2.67/2.80 -> 3.68/2.48/2.44,
             // real edits 4.74 -> 4.57.
             tone_chroma: 0.6625,
             contrast_key: 0.0,
@@ -1495,14 +1495,14 @@ pub struct ToneMap {
 /// image `w` x `h`.
 #[derive(Clone, Debug, Default)]
 pub struct ToneGrid {
-    g: Vec<f32>,
-    ma: Vec<f32>,
-    mb: Vec<f32>,
-    gw: usize,
-    gh: usize,
-    scale: f32,
-    w: usize,
-    h: usize,
+    pub(crate) g: Vec<f32>,
+    pub(crate) ma: Vec<f32>,
+    pub(crate) mb: Vec<f32>,
+    pub(crate) gw: usize,
+    pub(crate) gh: usize,
+    pub(crate) scale: f32,
+    pub(crate) w: usize,
+    pub(crate) h: usize,
 }
 
 impl ToneGrid {
@@ -1526,6 +1526,16 @@ impl ToneGrid {
             e
         };
         self.sample(&self.ma, x, y) * guide + self.sample(&self.mb, x, y) - e
+    }
+}
+
+impl ToneGrid {
+    /// Each pixel's offset, for the whole picture the grid was made from (its scene light `lit`).
+    pub fn offsets(&self, lit: &[f32], t: &Tuning) -> Vec<f32> {
+        use rayon::prelude::*;
+        let ev = |l: f32| (l.max(1e-5) / 0.18).log2();
+        let (w, scale) = (self.w, self.scale);
+        (0..lit.len()).into_par_iter().map(|i| self.offset_at(ev(lit[i]), (i % w) as f32 / scale, (i / w) as f32 / scale, t)).collect()
     }
 }
 
@@ -1555,20 +1565,35 @@ impl ToneMap {
 
     /// From each pixel's scene light (luminance after exposure and white balance).
     pub fn build(lit: &[f32], w: usize, h: usize, t: &Tuning) -> ToneMap {
+        Self::build_with(lit, w, h, t, true)
+    }
+
+    /// `build`, with each pixel's offset worked out (`offsets`) or left for later (`offsets_for`;
+    /// the GPU works them out from the grid itself).
+    pub fn build_with(lit: &[f32], w: usize, h: usize, t: &Tuning, offsets: bool) -> ToneMap {
         let grid = (t.tone_grid.round() as usize).clamp(16, 2048);
         let ev = |l: f32| (l.max(1e-5) / 0.18).log2();
         let scale = (w.max(h) as f32 / grid as f32).max(1.0);
         let (gw, gh) = (((w as f32 / scale).ceil() as usize).max(1), ((h as f32 / scale).ceil() as usize).max(1));
-        // The small copy: mean log brightness per cell.
+        // The small copy: mean log brightness per cell. A row of cells at a time on all cores, each
+        // cell's pixels added in the same order as one pass over the picture would (rows, then
+        // columns), so the same sums.
         let mut sum = vec![0.0f32; gw * gh];
         let mut cnt = vec![0.0f32; gw * gh];
-        for y in 0..h {
-            let gy = ((y as f32 / scale) as usize).min(gh - 1);
-            for x in 0..w {
-                let gx = ((x as f32 / scale) as usize).min(gw - 1);
-                sum[gy * gw + gx] += ev(lit[y * w + x]);
-                cnt[gy * gw + gx] += 1.0;
-            }
+        {
+            use rayon::prelude::*;
+            sum.par_chunks_mut(gw).zip(cnt.par_chunks_mut(gw)).enumerate().for_each(|(gy, (srow, crow))| {
+                for y in 0..h {
+                    if ((y as f32 / scale) as usize).min(gh - 1) != gy {
+                        continue;
+                    }
+                    for x in 0..w {
+                        let gx = ((x as f32 / scale) as usize).min(gw - 1);
+                        srow[gx] += ev(lit[y * w + x]);
+                        crow[gx] += 1.0;
+                    }
+                }
+            });
         }
         let g: Vec<f32> = sum.iter().zip(&cnt).map(|(s, c)| s / c.max(1.0)).collect();
         let mut sorted = g.clone();
@@ -1610,16 +1635,14 @@ impl ToneMap {
         // Full size: a and b read bilinearly, applied to each pixel's own brightness.
         let grid = ToneGrid { g, ma, mb, gw, gh, scale, w, h };
         use rayon::prelude::*;
-        let offset = (0..w * h)
-            .into_par_iter()
-            .map(|i| grid.offset_at(ev(lit[i]), (i % w) as f32 / scale, (i / w) as f32 / scale, t))
-            .collect();
+        let offset = if offsets { grid.offsets(lit, t) } else { Vec::new() };
         // Per-pixel brightness statistics (every few pixels is plenty).
         let step = (lit.len() / 250_000).max(1);
         // Capped where a render reaches white (about 2.5 stops over mid-grey), as
         // the measurements behind `hs_adaptive` read them from exports.
         let mut lv: Vec<f32> = lit.iter().step_by(step).map(|&l| ev(l).min(2.5)).collect();
-        lv.sort_by(|a, b| a.total_cmp(b));
+        // On all cores (a sort's result is the same however it's done).
+        lv.par_sort_unstable_by(|a, b| a.total_cmp(b));
         let q = |f: f32| lv[((lv.len() - 1) as f32 * f) as usize];
         let stats = [lv.iter().sum::<f32>() / lv.len() as f32, q(0.5), q(0.9), q(0.995)];
         ToneMap { offset, grid, key, span, stats }
@@ -1629,10 +1652,10 @@ impl ToneMap {
 /// Conversions between display-linear Rec.2020 and OKLab, a perceptual colour
 /// space where chroma can be scaled without shifting hue or lightness.
 pub struct Oklab {
-    to_lms: [[f32; 3]; 3],
-    from_lms: [[f32; 3]; 3],
-    lms_to_lab: [[f32; 3]; 3],
-    lab_to_lms: [[f32; 3]; 3],
+    pub(crate) to_lms: [[f32; 3]; 3],
+    pub(crate) from_lms: [[f32; 3]; 3],
+    pub(crate) lms_to_lab: [[f32; 3]; 3],
+    pub(crate) lab_to_lms: [[f32; 3]; 3],
 }
 
 impl Oklab {
@@ -1740,8 +1763,227 @@ fn look_hsv(c: [f32; 3], t: &Tuning) -> [f32; 3] {
     apply3(&from, out)
 }
 
-/// How many times a channel may grow or shrink in the Mixer's solve before it counts as run away.
-const RUNAWAY: f32 = 3.0;
+/// For comparing the Mixer's solves (`examples/mixsolve_check.rs`): 1 = the solve (always, unless
+/// a comparison sets another), 0 = the one before 25 Oct 2026 (eight rounds of channel ratios, and a
+/// colour whose solve ran more than 3x away kept as it was), 3 = the solve run to convergence. While
+/// it isn't 1 the GPU engine leaves renders to the CPU.
+pub static MIX_SOLVE_COMPARE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(1);
+/// With `MIX_COUNT` set, how many colour renders the solves did (`MIX_EVALS`) and how many solves.
+pub static MIX_COUNT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub static MIX_EVALS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static MIX_CALLS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn count(what: &std::sync::atomic::AtomicU64) {
+    if MIX_COUNT.load(std::sync::atomic::Ordering::Relaxed) {
+        what.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// The Mixer's solve as it was before 25 Oct 2026, for comparisons (`MIX_SOLVE_COMPARE` 0).
+fn mixer_solve_before(lit: [f32; 3], shown_lit: [f32; 3], target: [f32; 3], shown_of: &dyn Fn([f32; 3]) -> [f32; 3]) -> [f32; 3] {
+    count(&MIX_CALLS);
+    let start = lit.map(|v| v.max(1e-4));
+    let mut x = start;
+    let mut known = (start == lit).then_some(shown_lit);
+    for _ in 0..8 {
+        let now = known.take().unwrap_or_else(|| {
+            count(&MIX_EVALS);
+            shown_of(x)
+        });
+        let next: [f32; 3] = std::array::from_fn(|k| if now[k] > 1e-6 { x[k] * (target[k].max(0.0) / now[k]).clamp(0.25, 4.0) } else { x[k] });
+        if next == x {
+            break;
+        }
+        x = next;
+    }
+    if (0..3).any(|k| x[k] > start[k] * 3.0 || x[k] < start[k] / 3.0) {
+        return lit;
+    }
+    x
+}
+
+/// The Mixer's solve (`ToolTuning::mix_before_tone`): the scene colour that shows as `target`
+/// through `shown_of` (the colour as shown without the tone sliders), starting from `lit`, which
+/// shows as `shown_lit`.
+///
+/// A Levenberg-Marquardt solve on the log of each scene channel, its error measured in OKLab: the
+/// first guess is that each shown channel follows its own scene channel, and Broyden's update
+/// corrects that guess as the colour moves. A step is kept only when it brings a fair share of the
+/// improvement it promised (`MIX_SOLVE_GAIN`), else the next is shorter, so the solve never jumps to
+/// another colour that happens to be a little closer; where it stalls far from the target, steps of
+/// the old ratio kind cross the plateau it is on. Most colours settle in a round or two (renders
+/// with the Mixer about a quarter faster than with the old fixed eight rounds). A colour the target
+/// can't be shown as (held at the edge of what the profile shows, Saturation or Vibrance far up)
+/// ends at the nearest one it can reach, each channel within `MIX_SOLVE_BOX` times where it started.
+/// (Before 25 Oct the solve often hadn't settled, and a colour whose channel ran more than 3x away
+/// was dropped back to unmixed, pixel by pixel: speckle in deep navy and bright cyan, and whole
+/// areas turned red or green with Saturation up. Checked on 97 photos from 24 of Chris's shoots,
+/// half held out: PROGRESS.md, 25 Oct.)
+fn mixer_solve(lit: [f32; 3], shown_lit: [f32; 3], target: [f32; 3], shown_of: &dyn Fn([f32; 3]) -> [f32; 3], ok: &Oklab) -> [f32; 3] {
+    mixer_solve_with(lit, shown_lit, target, shown_of, ok, MIX_SOLVE_ROUNDS, MIX_SOLVE_TOL, MIX_SOLVE_BOX.ln())
+}
+
+/// Colour renders the Mixer's solve may do after its first (each one a step; most colours need one
+/// or two).
+const MIX_SOLVE_ROUNDS: usize = 10;
+/// The solve has settled when the shown colour is within this of the target in OKLab (each of
+/// L, a and b; an 8-bit level is about 0.004 in L).
+const MIX_SOLVE_TOL: f32 = 2e-4;
+/// How far a scene channel may move in the solve: up to this many times its starting level, or
+/// down to one over it.
+const MIX_SOLVE_BOX: f32 = 8.0;
+/// The largest step a channel takes in one round (log: x4 or /4).
+const MIX_SOLVE_STEP: f32 = 1.386_294_4;
+/// A step is kept when the error falls by at least this share of what the step's guess promised.
+const MIX_SOLVE_GAIN: f32 = 0.25;
+/// The solve has stalled when a round takes less than this share off the (squared) error while the
+/// colour is still this far (OKLab) from the target: then ratio steps, while each clearly helps.
+const MIX_SOLVE_STALL: f32 = 0.05;
+const MIX_SOLVE_FAR: f32 = 0.01;
+/// A ratio step is kept when it takes at least this share off the (squared) error: clearly, so the
+/// rounding of the arithmetic (the CPU's or a GPU's) never decides it.
+const MIX_SOLVE_CLEAR: f32 = 0.01;
+
+/// The Mixer solve's numbers, for the GPU engine's copy of it (`gpu::params`).
+#[derive(Clone, Copy)]
+pub(crate) struct MixSolveConstants {
+    pub rounds: usize,
+    pub tol: f32,
+    pub step: f32,
+    pub bound: f32,
+    pub gain: f32,
+    pub stall: f32,
+    pub far: f32,
+    pub clear: f32,
+}
+
+pub(crate) const MIX_SOLVE_CONSTANTS: MixSolveConstants = MixSolveConstants { rounds: MIX_SOLVE_ROUNDS, tol: MIX_SOLVE_TOL, step: MIX_SOLVE_STEP, bound: MIX_SOLVE_BOX, gain: MIX_SOLVE_GAIN, stall: MIX_SOLVE_STALL, far: MIX_SOLVE_FAR, clear: MIX_SOLVE_CLEAR };
+
+/// `mixer_solve` with its limits: rounds, tolerance and how far (log) a channel may move.
+#[allow(clippy::too_many_arguments)]
+fn mixer_solve_with(lit: [f32; 3], shown_lit: [f32; 3], target: [f32; 3], shown_of: &dyn Fn([f32; 3]) -> [f32; 3], ok: &Oklab, rounds: usize, tol: f32, bound: f32) -> [f32; 3] {
+    count(&MIX_CALLS);
+    let start = lit.map(|v| v.max(1e-4));
+    let goal = ok.to_lab(target.map(|v| v.max(0.0)));
+    let now = if start == lit {
+        shown_lit
+    } else {
+        count(&MIX_EVALS);
+        shown_of(start)
+    };
+    let miss = |shown: [f32; 3]| -> [f32; 3] {
+        let l = ok.to_lab(shown.map(|v| v.max(0.0)));
+        std::array::from_fn(|k| l[k] - goal[k])
+    };
+    let norm2 = |r: &[f32; 3]| r[0] * r[0] + r[1] * r[1] + r[2] * r[2];
+    let worst = |r: &[f32; 3]| r[0].abs().max(r[1].abs()).max(r[2].abs());
+    let mut r = miss(now);
+    if worst(&r) < tol {
+        return start;
+    }
+    // Unknowns: the log of each scene channel. The first guess at how the shown colour (in OKLab)
+    // follows them: each shown channel in proportion to its own scene channel.
+    let u0 = start.map(f32::ln);
+    let mut u = u0;
+    let mut jac = oklab_jacobian(ok, now);
+    for row in jac.iter_mut() {
+        for k in 0..3 {
+            row[k] *= now[k].max(0.0);
+        }
+    }
+    // The damping (Nielsen's rule): set from the first guess, then eased as steps work out.
+    let mut mu = -1.0f32;
+    let mut nu = 2.0f32;
+    // The colour shown at `u`, for the ratio step (below).
+    let mut shown = now;
+    let (mut ratio_left, mut use_ratio) = (true, false);
+    for _ in 0..rounds {
+        let jt = transpose3(&jac);
+        let mut a = mul3(&jt, &jac);
+        if mu < 0.0 {
+            mu = 1e-3 * a[0][0].max(a[1][1]).max(a[2][2]);
+        }
+        for k in 0..3 {
+            a[k][k] += mu;
+        }
+        let g = apply3(&jt, r);
+        let inv = crate::whitebalance::invert3(&a);
+        // The step, no more than MIX_SOLVE_STEP a channel, and each channel kept in its box. Once
+        // the solve stalls far from its target, the old solve's step once instead: each channel
+        // moved by how far its shown channel is from the target's. It crosses plateaus the colour
+        // has where Saturation or Vibrance hold it at the edge of what can be shown, so the shown
+        // colour doesn't follow the scene's at all for a while.
+        let ratio = std::mem::take(&mut use_ratio);
+        let step: [f32; 3] = std::array::from_fn(|k| {
+            let s = if ratio {
+                if shown[k] > 1e-6 { (target[k].max(0.0) / shown[k]).clamp(0.25, 4.0).ln() } else { 0.0 }
+            } else {
+                (-(inv[k][0] * g[0] + inv[k][1] * g[1] + inv[k][2] * g[2])).clamp(-MIX_SOLVE_STEP, MIX_SOLVE_STEP)
+            };
+            (u[k] + s).clamp(u0[k] - bound, u0[k] + bound) - u[k]
+        });
+        if !step.iter().all(|v| v.is_finite()) || norm2(&step) < 1e-12 {
+            break;
+        }
+        let u2: [f32; 3] = std::array::from_fn(|k| u[k] + step[k]);
+        count(&MIX_EVALS);
+        let shown2 = shown_of(u2.map(f32::exp));
+        let r2 = miss(shown2);
+        if !r2.iter().all(|v| v.is_finite()) {
+            break;
+        }
+        // What the guess promised, and what the step did.
+        let pred = apply3(&jac, step);
+        let model: [f32; 3] = std::array::from_fn(|k| r[k] + pred[k]);
+        let before = norm2(&r);
+        let promised = before - norm2(&model);
+        let gained = before - norm2(&r2);
+        // Broyden's update: the guess corrected by how the colour really moved.
+        let ss = norm2(&step);
+        for i in 0..3 {
+            for k in 0..3 {
+                jac[i][k] += (r2[i] - r[i] - pred[i]) * step[k] / ss;
+            }
+        }
+        let rho = if promised > 0.0 { gained / promised } else { -1.0 };
+        let kept = if ratio { gained > MIX_SOLVE_CLEAR * before } else { rho > MIX_SOLVE_GAIN };
+        if kept {
+            u = u2;
+            r = r2;
+            shown = shown2;
+            if !ratio {
+                mu *= (1.0 - (2.0 * rho - 1.0).powi(3)).max(1.0 / 3.0);
+                nu = 2.0;
+            }
+            if worst(&r) < tol {
+                break;
+            }
+        } else if !ratio {
+            mu *= nu;
+            nu *= 2.0;
+        }
+        // Stalled far from the target: ratio steps, as long as each clearly helps.
+        if ratio && !kept {
+            ratio_left = false;
+        }
+        if ratio_left && (!kept || gained < MIX_SOLVE_STALL * before) && worst(&r) > MIX_SOLVE_FAR {
+            use_ratio = true;
+        }
+    }
+    u.map(f32::exp)
+}
+
+fn transpose3(m: &[[f32; 3]; 3]) -> [[f32; 3]; 3] {
+    std::array::from_fn(|i| std::array::from_fn(|j| m[j][i]))
+}
+
+/// How OKLab (L, a, b) moves with each display-linear Rec.2020 channel at `rgb`.
+fn oklab_jacobian(ok: &Oklab, rgb: [f32; 3]) -> [[f32; 3]; 3] {
+    let lms = apply3(&ok.to_lms, rgb.map(|v| v.max(0.0)));
+    let d = lms.map(|v| 1.0 / (3.0 * v.max(1e-6).cbrt().powi(2)));
+    let mid: [[f32; 3]; 3] = std::array::from_fn(|i| std::array::from_fn(|j| d[i] * ok.to_lms[i][j]));
+    mul3(&ok.lms_to_lab, &mid)
+}
 
 /// A colour with its chroma boosted by `k` (`colour_at(k)`), held inside the colours the scene
 /// space can hold. If the full boost would push a channel negative, the strength is eased off
@@ -1782,10 +2024,10 @@ pub fn colour_adjust(rgb: [f32; 3], s: &RenderSettings, t: &Tuning, ok: &Oklab) 
 pub struct ColourAdjust<'a> {
     s: &'a RenderSettings,
     t: &'a Tuning,
-    has_look: bool,
-    kc_full: f32,
+    pub(crate) has_look: bool,
+    pub(crate) kc_full: f32,
     /// Vibrance's strength, `(vibrance / 100) ^ vibrance_curve * vibrance_plus` (boosts only).
-    vibrance_v: f32,
+    pub(crate) vibrance_v: f32,
 }
 
 impl<'a> ColourAdjust<'a> {
@@ -1885,7 +2127,7 @@ impl<'a> ColourAdjust<'a> {
 }
 
 /// Rec.2020 luminance weights.
-const LUMA: [f32; 3] = [0.2627, 0.6780, 0.0593];
+pub(crate) const LUMA: [f32; 3] = [0.2627, 0.6780, 0.0593];
 
 /// CIELAB L* of a display-linear Rec.2020 colour (white = 1).
 pub fn lightness(c: [f32; 3]) -> f32 {
@@ -2095,7 +2337,7 @@ pub fn render16(
 
 /// The render, each channel (display-encoded, 0..1) turned into the output
 /// type by `q` (`as` saturates, so out-of-range values clip).
-fn render_core_q<T: Copy + Send>(
+fn render_core_q<T: Copy + Send + 'static>(
     scene: &SceneImage,
     settings: &RenderSettings,
     baseline: f32,
@@ -2181,18 +2423,32 @@ fn render_core_q<T: Copy + Send>(
     let plain = Tuning { look_chroma: [1.0, 0.0, 0.0, 0.0, 0.0], look_hue: [0.0; 4], look_light: [0.0; 4], look_comp: 0.0, look_lut: [[0.0; 3]; 12], look_warm: [[0.0; 2]; 5], ..*tuning };
     // The local tone sliders' map of area brightness, when they need one.
     let _p_map = crate::prof::span("  tone map (area brightness)");
-    let tone_map = ToneMap::wanted(settings, tuning).then(|| {
+    // A render the GPU will try works out each pixel's offset from the map's grid itself; the CPU
+    // works them out only if it renders after all (`lazy_offsets`).
+    let gpu_first = crate::gpu::mode() != crate::gpu::RenderMode::Cpu && crate::gpu::unsupported(tuning).is_none();
+    let mut tone_lit: Option<Vec<f32>> = None;
+    let tone_map = if ToneMap::wanted(settings, tuning) {
         let lit: Vec<f32> = scene.px.par_iter().map(|&p| {
             let c = apply3(&light, p);
             LUMA[0] * c[0] + LUMA[1] * c[1] + LUMA[2] * c[2]
         }).collect();
         // A part of the photo reads the whole photo's map at its place.
-        match (&region, &frame) {
+        let m = match (&region, &frame) {
             (Some(r), Some(f)) if r.measured.tone_map.is_some() => r.measured.tone_map.as_ref().unwrap().for_part(&lit, scene.width, f, tuning),
-            _ => ToneMap::build(&lit, scene.width, scene.height, tuning),
-        }
-    });
-    let at = |i: usize| tone_map.as_ref().map_or((0.0, tuning.tone_key_ref, tuning.tone_span_ref), |m| (m.offset[i], m.key, m.span));
+            _ => ToneMap::build_with(&lit, scene.width, scene.height, tuning, !gpu_first),
+        };
+        tone_lit = Some(lit);
+        Some(m)
+    } else {
+        None
+    };
+    let lazy_offsets = std::sync::OnceLock::new();
+    let at = |i: usize| {
+        tone_map.as_ref().map_or((0.0, tuning.tone_key_ref, tuning.tone_span_ref), |m| {
+            let offset = if m.offset.is_empty() { lazy_offsets.get_or_init(|| m.grid.offsets(tone_lit.as_deref().unwrap_or(&[]), tuning)) } else { &m.offset };
+            (offset[i], m.key, m.span)
+        })
+    };
     // The photo's brightness statistics, for photo-adaptive Highlights / Shadows.
     let with_stats;
     let tuning = match &tone_map {
@@ -2226,27 +2482,11 @@ fn render_core_q<T: Copy + Send>(
         }
         let shown_lit = shown_of(lit);
         let target = display_tools.apply_mixer_part(shown_lit, &oklab, [true, true, false]);
-        let start = lit.map(|v| v.max(1e-4));
-        let mut x = start;
-        // The first round's colour is the one just shown, when the solve starts from it unchanged.
-        let mut known = (start == lit).then_some(shown_lit);
-        for _ in 0..8 {
-            let now = known.take().unwrap_or_else(|| shown_of(x));
-            let next: [f32; 3] = std::array::from_fn(|k| if now[k] > 1e-6 { x[k] * (target[k].max(0.0) / now[k]).clamp(0.25, 4.0) } else { x[k] });
-            // Settled exactly: every further round would give the same colour again.
-            if next == x {
-                break;
-            }
-            x = next;
+        match MIX_SOLVE_COMPARE.load(std::sync::atomic::Ordering::Relaxed) {
+            1 => mixer_solve(lit, shown_lit, target, shown_of, &oklab),
+            0 => mixer_solve_before(lit, shown_lit, target, shown_of),
+            _ => mixer_solve_with(lit, shown_lit, target, shown_of, &oklab, 60, 1e-6, f32::INFINITY),
         }
-        // Where the colour is held at the edge of the gamut (Saturation / Vibrance far up) the
-        // target can't be reached and the correction runs away - a channel several times what it
-        // started as - to another hue (green speckle). A real Mixer move stays close: when the
-        // solve ran away, keep the colour as it was.
-        if (0..3).any(|k| x[k] > start[k] * RUNAWAY || x[k] < start[k] / RUNAWAY) {
-            return lit;
-        }
-        x
     };
     let tone_with = |settings: &RenderSettings, i: usize, p: [f32; 3]| -> [f32; 3] {
         let (offset, key, span) = at(i);
@@ -2368,18 +2608,69 @@ fn render_core_q<T: Copy + Send>(
         out.map(&q)
     };
     drop(_p_stats);
+    // The GPU engine (`gpu`) does the per-pixel steps when the Render setting lets it and it covers
+    // everything this render needs; else (and whenever the GPU fails) the CPU does, below.
+    let gpu_job = (crate::gpu::mode() != crate::gpu::RenderMode::Cpu)
+        .then(|| match crate::gpu::unsupported(tuning).or(table.is_some().then_some("the measured tone table")) {
+            Some(why) => {
+                crate::gpu::note_cpu(why);
+                None
+            }
+            None => Some(crate::gpu::Job {
+                scene,
+                settings,
+                bands: &bands,
+                tuning,
+                light,
+                gain,
+                wb_gain,
+                camera: camera.as_ref(),
+                curve: &curve,
+                display_tools: &display_tools,
+                has_look: adjust.has_look,
+                kc_full: adjust.kc_full,
+                vibrance_v: adjust.vibrance_v,
+                mix_scene,
+                mixer_moves,
+                frame,
+                tone_map: tone_map.as_ref(),
+                adobe,
+                grads: grads.as_ref(),
+                sixteen: std::any::TypeId::of::<T>() == std::any::TypeId::of::<u16>(),
+                detail: crate::gpu::wanted_detail(),
+            }),
+        })
+        .flatten();
     let local_def = grads.as_ref().is_some_and(|g| g.has_definition());
     let px: Vec<T> = if crate::tools::definition_active(&settings.tools) || local_def {
         // Texture, Clarity and Dehaze need each pixel's neighbourhood, so
         // render the whole image first, then finish it.
-        let p_tone = crate::prof::span("  per-pixel tone (before Definition)");
-        let mut toned: Vec<[f32; 3]> = scene.px.par_iter().enumerate().map(|(i, &p)| tone(i, p)).collect();
-        drop(p_tone);
-        let _p_def = crate::prof::span("  Definition (Texture/Clarity/Dehaze)");
-        let def = crate::tools::DefinitionPart {
+        let def_part = || crate::tools::DefinitionPart {
             frame: frame.as_ref(),
             measured: region.as_ref().map(|r| &r.measured).or(settings.reuse_measured.as_ref()).and_then(|m| m.definition.as_ref()),
         };
+        // All of it on the GPU when it can (the toned picture never leaves it), the masks' too.
+        if let Some(j) = &gpu_job {
+            if let Some((out, measured)) = crate::gpu::render_definition(j, &settings.tools, &tuning.tools, scene.source_long, def_part()) {
+                if let Some(px) = gpu_pixels(out) {
+                    if let (Some(slot), Some(measured)) = (&settings.measure_into, measured) {
+                        if let Some(m) = slot.lock().unwrap().as_mut() {
+                            m.definition = Some(measured);
+                        }
+                    }
+                    return px;
+                }
+            }
+        }
+        let p_tone = crate::prof::span("  per-pixel tone (before Definition)");
+        let on_gpu = gpu_job.as_ref().and_then(|j| match crate::gpu::render(j, crate::gpu::Pass::Tone, None) {
+            Some(crate::gpu::Output::Toned(t)) => Some(t),
+            _ => None,
+        });
+        let mut toned: Vec<[f32; 3]> = on_gpu.unwrap_or_else(|| scene.px.par_iter().enumerate().map(|(i, &p)| tone(i, p)).collect());
+        drop(p_tone);
+        let _p_def = crate::prof::span("  Definition (Texture/Clarity/Dehaze)");
+        let def = def_part();
         if crate::tools::definition_active(&settings.tools) {
             let def_measured = crate::tools::apply_definition(&mut toned, w, h, scene.source_long, &settings.tools, &tuning.tools, &oklab, def);
             if let Some(slot) = &settings.measure_into {
@@ -2393,10 +2684,13 @@ fn render_core_q<T: Copy + Send>(
         // faded in pixel by pixel by the gradients' amount there. The same
         // tools and numbers as the global sliders (not refitted to
         // Lightroom's local ones yet).
+        // Each measures on the whole photo once, as the sliders' tools do: a slider drag or a
+        // zoomed-in part reuses that (`DefinitionMeasured::masks`).
         if let Some(g) = grads.as_ref().filter(|g| g.has_definition()) {
             let amounts: Vec<[f32; 3]> = (0..toned.len()).into_par_iter().map(|i| { let (fx, fy) = frac(i); g.at_frac(fx, fy).definition }).collect();
+            let mut mask_measured = Vec::new();
             for tool in 0..3 {
-                for sign in [1.0f32, -1.0] {
+                for (way, sign) in [1.0f32, -1.0].into_iter().enumerate() {
                     let peak = amounts.iter().map(|a| a[tool] * sign).fold(0.0f32, f32::max);
                     if peak < 0.5 {
                         continue;
@@ -2409,8 +2703,12 @@ fn render_core_q<T: Copy + Send>(
                         ..Default::default()
                     };
                     let mut done = toned.clone();
-                    let part = crate::tools::DefinitionPart { frame: frame.as_ref(), measured: None };
-                    crate::tools::apply_definition(&mut done, w, h, scene.source_long, &one, &tuning.tools, &oklab, part);
+                    let key = tool * 2 + way;
+                    let reuse = def.measured.and_then(|m| m.mask(key, &one, &tuning.tools));
+                    let part = crate::tools::DefinitionPart { frame: frame.as_ref(), measured: reuse };
+                    if let Some(m) = crate::tools::apply_definition(&mut done, w, h, scene.source_long, &one, &tuning.tools, &oklab, part) {
+                        mask_measured.push((key, m));
+                    }
                     toned.par_iter_mut().zip(done.par_iter()).zip(amounts.par_iter()).for_each(|((c, d), a)| {
                         let k = (a[tool] * sign / peak).clamp(0.0, 1.0);
                         if k > 0.0 {
@@ -2419,15 +2717,36 @@ fn render_core_q<T: Copy + Send>(
                     });
                 }
             }
+            if let Some(slot) = settings.measure_into.as_ref().filter(|_| !mask_measured.is_empty()) {
+                if let Some(m) = slot.lock().unwrap().as_mut() {
+                    m.definition.get_or_insert_with(Default::default).masks = mask_measured;
+                }
+            }
         }
         drop(_p_def);
+        if let Some(px) = gpu_job.as_ref().and_then(|j| crate::gpu::render(j, crate::gpu::Pass::Finish, Some(&toned))).and_then(gpu_pixels) {
+            return px;
+        }
         let _p = crate::prof::span("  per-pixel finish (display, sRGB)");
         toned.into_par_iter().enumerate().flat_map_iter(|(i, c)| finish(i, c)).collect()
     } else {
+        if let Some(px) = gpu_job.as_ref().and_then(|j| crate::gpu::render(j, crate::gpu::Pass::Full, None)).and_then(gpu_pixels) {
+            return px;
+        }
         let _p = crate::prof::span("  per-pixel tone + finish");
         scene.px.par_iter().enumerate().flat_map_iter(|(i, &p)| finish(i, tone(i, p))).collect()
     };
     px
+}
+
+/// A GPU render's pixels as `render_core_q`'s output type.
+fn gpu_pixels<T: 'static>(out: crate::gpu::Output) -> Option<Vec<T>> {
+    let any: Box<dyn std::any::Any> = match out {
+        crate::gpu::Output::Bytes(v) => Box::new(v),
+        crate::gpu::Output::Words(v) => Box::new(v),
+        crate::gpu::Output::Toned(_) => return None,
+    };
+    any.downcast::<Vec<T>>().ok().map(|v| *v)
 }
 
 pub fn render_dynamic(scene: &SceneImage, settings: &RenderSettings, baseline: f32, wb: Option<&WhiteBalance>) -> DynamicImage {

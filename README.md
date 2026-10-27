@@ -25,6 +25,7 @@ Part of a family of apps by Chris Cork Photography: RapidOne brings
 
 **[⬇ Download the latest version](https://github.com/crispin81/RapidOne/releases/latest)**
 
+- **2026-10-27 (v1.1.0, Linux):** A new GPU render engine: editing, zoom and export on your graphics card, with the processor as a fallback, and a GPU: Yes / No light in the title bar. Touchpad pinch zooms the photo (not the whole window), smoother slider previews (no wobble, blocky frames or white edge line), and Retouch's Backdrop is faster with no halo round hair edges and loose curls. Windows and Mac 1.1.0 to follow
 - **2026-10-25 (v1.0.0):** Now on Mac (Apple Silicon): a .dmg, with AI Denoise on the Mac's graphics
 - **2026-10-25 (v1.0.0):** Now on Windows (10 and 11, 64-bit): a setup .exe and an .msi. And RapidCull for Android: cull on your phone, offline too, synced with RapidOne
 - **2026-10-24 (v1.0.0):** First release, for Linux: Cull, Edit and Retouch in one app, RapidOne's own RAW engine, Aftershoot-style AI editing that learns your style, Evoto-style retouching, masks, AI Erase, Patch, AI Denoise and Lightroom XMP support

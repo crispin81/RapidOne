@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
 import { Minus, Square, X } from "lucide-react";
 import About from "./About";
+import RenderMenu from "./RenderMenu";
 import { openExternal } from "../openExternal";
 
 /** Chris's RapidOne tutorials on YouTube (the Learn button). */
@@ -76,24 +77,26 @@ export default function TitleBar({ progress, statusSlot, handBack, mode }: Props
             <path d="M6 3.2v4.6L9.9 5.5z" fill="#fff" />
           </svg>
         </button>
+        <RenderMenu retouch={mode === "retouch"} />
+        {loading && (
+          // The orange-to-cyan loading bar (with its sweep), after Render in the same row, so it never runs
+          // over or under the buttons; up here nothing covers it, on every tab.
+          <span className="titlebar__scan" role="status" title={loading.label + (loading.total ? `: ${loading.done} of ${loading.total}` : "")}>
+            <span className="titlebar__scan-label">{loading.label}</span>
+            <span className="handback-progress__bar">
+              <span className="handback-progress__fill" style={{ display: "block", width: `${Math.max(3, (fraction ?? 0.35) * 100)}%` }} />
+            </span>
+            {loading.total ? (
+              <span className="titlebar__scan-count">
+                {loading.done}/{loading.total}
+              </span>
+            ) : fraction != null ? (
+              <span className="titlebar__scan-count">{Math.round(fraction * 100)}%</span>
+            ) : null}
+          </span>
+        )}
       </div>
       {about && <About onClose={() => setAbout(false)} />}
-      {loading && (
-        // The orange-to-cyan loading bar (with its sweep); up here nothing covers it, on every tab.
-        <span className="titlebar__scan" role="status" title={loading.label + (loading.total ? `: ${loading.done} of ${loading.total}` : "")}>
-          <span className="titlebar__scan-label">{loading.label}</span>
-          <span className="handback-progress__bar">
-            <span className="handback-progress__fill" style={{ display: "block", width: `${Math.max(3, (fraction ?? 0.35) * 100)}%` }} />
-          </span>
-          {loading.total ? (
-            <span className="titlebar__scan-count">
-              {loading.done}/{loading.total}
-            </span>
-          ) : fraction != null ? (
-            <span className="titlebar__scan-count">{Math.round(fraction * 100)}%</span>
-          ) : null}
-        </span>
-      )}
       {statusSlot && <div className="titlebar__status" ref={statusSlot} />}
       <span className="titlebar__title" data-tauri-drag-region>
         RapidOne{version && ` // V${version}`}

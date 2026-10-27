@@ -109,7 +109,7 @@ import { RapidCulling } from "rapidculling/ui";
 import { ExportDialog, RapidRetouch } from "rapidretouch/ui";
 import Library from "./components/Library";
 import { useExport } from "./useExport";
-import Viewer, { stepScale } from "./components/Viewer";
+import Viewer, { DragScale } from "./components/Viewer";
 import { DEFAULT_CURVES, type Curves } from "./curves";
 import { DEFAULT_GRADE, type Grade } from "./grade";
 import { DEFAULT_MIXER, type Mixer } from "./mixer";
@@ -970,6 +970,9 @@ export default function App() {
   useEffect(() => {
     let arrived: PhotoInfo[] = [];
     let progress: ScanProgress | null = null;
+    // The highest count of this scan so far: the reading threads each take a number, then send it,
+    // so a lower one can arrive after a higher one (the count jumped back and forth, 25 Oct).
+    let highest: ScanProgress | null = null;
     let timer: number | null = null;
     const flush = () => {
       timer = null;
@@ -1004,6 +1007,9 @@ export default function App() {
         soon();
       }),
       onScanProgress((p) => {
+        // A new scan starts at 0 (or has another total); within one, the count only goes up.
+        if (highest && p.done !== 0 && p.total === highest.total && p.done < highest.done) return;
+        highest = p;
         progress = p;
         // The last one (done) at once, so the bar never lingers.
         if (p.done >= p.total) flush();
@@ -1505,7 +1511,7 @@ export default function App() {
   // while a slider moves only the detail renders (it would compete for the CPU).
   const detailActive = useRef(false);
   // The size of the renders while a slider moves at Fit (of the 2400 px preview).
-  const fitDragScale = useRef(0.6);
+  const fitDragScale = useRef(new DragScale(0.6, 0.25));
   const onDetailActive = useCallback((active: boolean) => {
     detailActive.current = active;
   }, []);
@@ -1562,12 +1568,13 @@ export default function App() {
         try {
           const key = JSON.stringify(job.settings);
           // While dragging: a smaller render (soft while it moves, sharp the
-          // moment it stops: Chris's choice), its size stepping through
-          // 100/80/60/40/20% to keep frames quick on this computer.
-          const shownLong = Math.round(2400 * fitDragScale.current);
+          // moment it stops: Chris's choice), at the size the drag settles on
+          // (100/80/60/40/20%: dropping a level when frames are too slow; DragScale).
+          const shownLong = Math.round(2400 * fitDragScale.current.scale);
           const started = performance.now();
           const p = await renderPreview(job.path, job.settings, job.interactive ? undefined : key, job.interactive, shownLong);
-          if (job.interactive) fitDragScale.current = stepScale(fitDragScale.current, performance.now() - started, 0.25);
+          if (job.interactive) fitDragScale.current.frame(performance.now() - started);
+          else fitDragScale.current.end();
           // Superseded while it rendered: the edit changed to one whose picture is already made (the
           // photo's saved edit loaded during its first, unedited render, 24 Oct). That picture stays;
           // this one would replace it, and nothing would render again.
@@ -2457,9 +2464,18 @@ export default function App() {
   useEffect(() => {
     if (!currentPath) return;
     const path = currentPath;
+    // Only while this photo is still the open one: a slower load for a photo just left (a folder
+    // opening on one photo, then settling on another) finished last and set its own name here, so the
+    // open photo looked unloaded and never rendered, sliders and all (Windows, 24 Oct).
+    let live = true;
     void ensureEditLoaded(path)
       .catch(() => undefined)
-      .then(() => setEditLoadedPath(path));
+      .then(() => {
+        if (live) setEditLoadedPath(path);
+      });
+    return () => {
+      live = false;
+    };
   }, [currentPath, ensureEditLoaded]);
   loadEditsRef.current = async (paths: string[]) => {
     await Promise.all(paths.map((p) => ensureEditLoaded(p, true)));
@@ -3680,6 +3696,7 @@ export default function App() {
             beforePreview={beforePreview}
             compareWith={compareWith}
             onCompareWith={setCompareWith}
+            noCompare={libraryView}
             onCompareStart={() => compareWith === "before" && requestBefore(currentPath)}
             keysActive={mode === "edit" && !atHome && !cropping && menu === null}
             values={values}

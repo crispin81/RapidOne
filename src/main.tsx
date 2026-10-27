@@ -1,12 +1,18 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import { applySavedRenderMode } from "./components/RenderMenu";
 import "@fontsource/exo-2/300.css";
 import "@fontsource/exo-2/400.css";
 import "@fontsource/exo-2/500.css";
 import "@fontsource/exo-2/600.css";
 import "@fontsource/exo-2/700.css";
 import "@fontsource/exo-2/400-italic.css";
+
+// WebKitGTK (Linux) needs some parts of the window on drawing layers of their own (`will-change`, see
+// App.css: .webkitgtk) or it draws them stale or in the wrong place for a frame. Windows' WebView2
+// doesn't, and drew a stray curved line at the bottom with them while a slider moved (24 Oct).
+if (/Linux/.test(navigator.userAgent) && !/Android/.test(navigator.userAgent)) document.documentElement.classList.add("webkitgtk");
 
 // The default webview menu only offers Reload/Inspect, which do nothing useful here.
 window.addEventListener("contextmenu", (e) => e.preventDefault());
@@ -41,6 +47,9 @@ window.addEventListener(
   },
   true,
 );
+
+// The Render setting the user chose (Auto, GPU or CPU), before the first photo renders.
+applySavedRenderMode();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

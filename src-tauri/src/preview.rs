@@ -135,6 +135,16 @@ pub fn make_thumb_base64(
     orientation: u16,
     max_dim: u32,
 ) -> Result<(String, u32, u32), String> {
+    make_thumb_base64_at(img, orientation, max_dim, 75)
+}
+
+/// The same at a JPEG `quality` of the caller's choosing.
+pub fn make_thumb_base64_at(
+    img: &DynamicImage,
+    orientation: u16,
+    max_dim: u32,
+    quality: u8,
+) -> Result<(String, u32, u32), String> {
     // Shrunk first, then turned: no full-size copy (a square fit is the same either way round).
     let (w, h) = img.dimensions();
     let small = if w > max_dim || h > max_dim {
@@ -145,11 +155,9 @@ pub fn make_thumb_base64(
     let resized = apply_orientation(small, orientation);
     let (out_w, out_h) = resized.dimensions();
 
-    let mut bytes: Vec<u8> = Vec::new();
-    resized
-        .to_rgb8()
-        .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Jpeg)
-        .map_err(|e| e.to_string())?;
+    // On all cores (`jpeg`).
+    let rgb = resized.to_rgb8();
+    let bytes = crate::jpeg::encode(rgb.as_raw(), out_w, out_h, quality)?;
 
     let b64 = STANDARD.encode(&bytes);
     Ok((format!("data:image/jpeg;base64,{}", b64), out_w, out_h))

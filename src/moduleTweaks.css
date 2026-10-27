@@ -4,8 +4,9 @@
  */
 
 /* The loupe's Before | After (Retouch's buttons, blurred backdrop, placed from the bottom): WebKitGTK
-   put it in the wrong place for a frame when the loupe's layers changed; a layer of its own for good. */
-.viewer .rapidretouch .before-after {
+   put it in the wrong place for a frame when the loupe's layers changed; a layer of its own for good.
+   Linux only (.webkitgtk, main.tsx): on Windows the layer's rounded, blurred edge drew a stray line. */
+.webkitgtk .viewer .rapidretouch .before-after {
   will-change: transform;
 }
 

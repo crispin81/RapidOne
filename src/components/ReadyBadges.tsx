@@ -4,7 +4,7 @@ import DenoiseIcon from "./DenoiseIcon";
 
 /**
  * The top right of a thumbnail, each icon in a black circle: "edited" (sliders, cyan) on any photo
- * with an edit, as Lightroom marks one; then (Tron orange), once its full picture is rendered with its
+ * with an edit, as Lightroom marks one; then (neon orange), once its full picture is rendered with its
  * current edit, the sparkle (the Teach / apply look icon) when its look came from a style or a Lightroom
  * XMP, or the palette (Presets' icon) from a preset (`look`: which), and under it Auto level's ruler and Auto
  * keystone's building when those were applied, and Denoise's icon when it has Noise on, so a batch going

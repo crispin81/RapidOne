@@ -8,6 +8,7 @@ pub mod crop;
 pub mod dcp;
 pub mod dngcolour;
 pub mod fuji;
+pub mod gpu;
 pub mod gradient;
 pub mod gradetable;
 pub mod demosaic;
@@ -18,6 +19,7 @@ pub mod diskcache;
 pub mod export;
 pub mod handoff;
 pub mod imagefile;
+pub mod jpeg;
 pub mod tonetable;
 pub mod tools;
 pub mod lens;
@@ -30,6 +32,7 @@ pub mod lite;
 pub mod library;
 pub mod removal;
 pub mod patch;
+pub mod pinch;
 pub mod mixtable;
 pub mod pipeline;
 pub mod prof;
@@ -64,6 +67,18 @@ pub fn run() {
             use tauri::Manager;
             // Freed memory back to the system every half minute (memtrim.rs, Linux).
             crate::memtrim::start();
+            // Touchpad pinch zooms the photo, not the whole interface (pinch.rs, Linux).
+            crate::pinch::start(app);
+            // Renders on the GPU when there's a usable one (the Render setting, gpu.rs; the page
+            // sets the user's choice as it starts), its shader built in the background now.
+            crate::gpu::set_mode(crate::gpu::RenderMode::Auto);
+            crate::gpu::warm_up();
+            // The title bar's GPU button hears when renders move between the GPU and the CPU.
+            let handle = app.handle().clone();
+            crate::gpu::on_change(move |status| {
+                use tauri::Emitter;
+                let _ = handle.emit("render-status", status);
+            });
             // The AI models the installer carries (mask.rs::model_dirs).
             if let Ok(dir) = app.path().resource_dir() {
                 crate::mask::set_resource_dir(dir);
@@ -118,6 +133,8 @@ pub fn run() {
             commands::prepare_find,
             commands::removal_hold,
             commands::removal_modes,
+            commands::render_status,
+            commands::set_render_mode,
             commands::set_removal_mode,
             commands::remove_painted,
             commands::warm_denoise,

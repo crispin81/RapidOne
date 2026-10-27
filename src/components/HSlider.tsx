@@ -7,7 +7,7 @@ interface Props {
   step: number;
   value: number;
   onChange: (value: number) => void;
-  /** Where the fill starts: above it fills Tron orange, below cyan (default: `min`, so it fills orange). */
+  /** Where the fill starts: above it fills neon orange, below cyan (default: `min`, so it fills orange). */
   neutral?: number;
   /** Double-click (or double-tap) goes back to this (default: `neutral`). */
   reset?: number;

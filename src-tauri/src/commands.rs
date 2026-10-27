@@ -455,8 +455,15 @@ fn render_scene(
     settings: &crate::pipeline::RenderSettings,
 ) -> Result<DevelopedPreview, String> {
     let img = render_image(scene, settings);
-    preview_of(path, scene, settings, &img)
+    preview_of(path, scene, settings, &img, PREVIEW_JPEG_QUALITY)
 }
+
+/// The viewer's picture at rest: JPEG quality 75, as the image crate's JPEG writer had it.
+const PREVIEW_JPEG_QUALITY: u8 = 75;
+/// A slider drag's frames: smaller than the photo on screen and stretched up to it, so quality 75's
+/// blocks were stretched too and the photo looked heavily compressed while it moved (27 Oct). They're
+/// small, so the better quality costs a few ms.
+const DRAG_JPEG_QUALITY: u8 = 90;
 
 /// The viewer's picture of a rendered photo.
 fn preview_of(
@@ -464,8 +471,9 @@ fn preview_of(
     scene: &crate::develop::Scene,
     settings: &crate::pipeline::RenderSettings,
     img: &image::DynamicImage,
+    quality: u8,
 ) -> Result<DevelopedPreview, String> {
-    let (image_base64, width, height) = preview::make_thumb_base64(img, 1, FULL_PREVIEW_MAX_DIM)?;
+    let (image_base64, width, height) = preview::make_thumb_base64_at(img, 1, FULL_PREVIEW_MAX_DIM, quality)?;
     Ok(DevelopedPreview {
         path,
         image_base64,
@@ -527,12 +535,23 @@ fn render_image_depth(scene: &crate::develop::Scene, settings: &crate::pipeline:
     } else {
         settings
     };
+    let t = &settings.tools;
+    // Sharpening and grain on the GPU with the render when it renders it (`gpu::want_detail`): the
+    // picture's long edge over the sensor's, as below.
+    let wanted = (t.sharpen > 0.0 || t.grain > 0.0).then(|| {
+        let long = match &settings.region {
+            Some(r) => r.frame.full_w.max(r.frame.full_h),
+            None => scene.image.width.max(scene.image.height) as f32,
+        };
+        crate::gpu::Detail { sharpen: t.sharpen, grain: t.grain, scale: (long / scene.image.source_long.max(1) as f32).min(1.0) }
+    });
+    crate::gpu::want_detail(wanted);
     let mut img = {
         let _p = crate::prof::span("render (tone + colour)");
         render_image_tone(scene, settings, sixteen)
     };
+    let detail_on_gpu = crate::gpu::detail_done();
     // Detail last, on the finished picture: noise reduction, sharpening, grain.
-    let t = &settings.tools;
     // The picture's size against the sensor's, for sharpening's radius (a
     // part of the photo: the whole photo's size at the part's scale).
     let long = match &settings.region {
@@ -540,7 +559,7 @@ fn render_image_depth(scene: &crate::develop::Scene, settings: &crate::pipeline:
         None => img.width().max(img.height()) as f32,
     };
     let scale = (long / scene.image.source_long.max(1) as f32).min(1.0);
-    if t.sharpen > 0.0 || t.grain > 0.0 {
+    if (t.sharpen > 0.0 || t.grain > 0.0) && !detail_on_gpu {
         let _p = crate::prof::span("sharpen / grain");
         img = match img {
             ImageRgb16(mut rgb) => {
@@ -940,7 +959,7 @@ pub async fn refresh_photo(path: String, settings: crate::pipeline::RenderSettin
         }
         let img = render_image(&scene, &settings);
         let thumb = preview::make_thumb_base64(&img, 1, THUMB_EDGE)?.0;
-        Ok(RefreshedPhoto { preview: preview_of(path.clone(), &scene, &settings, &img)?, thumb })
+        Ok(RefreshedPhoto { preview: preview_of(path.clone(), &scene, &settings, &img, PREVIEW_JPEG_QUALITY)?, thumb })
     }))
     .await
     .map_err(|e| e.to_string())?
@@ -1063,7 +1082,14 @@ pub async fn render_preview(
         // The last full render's Definition measures, while they hold what these settings need.
         let reuse = measured.latest_for(&path).filter(|m| m.covers(&settings));
         let settings = crate::pipeline::RenderSettings { reuse_measured: reuse, ..settings };
-        return render_scene(path, &small, &settings);
+        #[cfg(debug_assertions)]
+        let started = std::time::Instant::now();
+        let img = render_image(&small, &settings);
+        let out = preview_of(path, &small, &settings, &img, DRAG_JPEG_QUALITY);
+        // Dev builds: each drag frame's size and time (what the drag settles on, DragScale).
+        #[cfg(debug_assertions)]
+        eprintln!("[drag] {}x{} {} ms", small.image.width, small.image.height, started.elapsed().as_millis());
+        return out;
     }
     let full = || {
         let scene = cache.get_or_develop(&path)?;
@@ -1127,10 +1153,9 @@ pub async fn render_detail(
     };
     let full_scene = full.get_or_develop(&path)?;
     let img = crate::zoom::render_part(&full_scene, &preview, m, &settings, rect, width, height)?;
-    let mut jpeg = Vec::new();
-    // While a slider moves, a lighter JPEG (it is replaced as soon as it stops).
+    // While a slider moves, a lighter JPEG (it is replaced as soon as it stops); on all cores.
     let quality = if interactive.unwrap_or(false) { 80 } else { 92 };
-    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, quality).encode_image(&img).map_err(|e| e.to_string())?;
+    let jpeg = crate::jpeg::encode(img.as_raw(), img.width(), img.height(), quality)?;
     use base64::Engine;
     Ok(format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(jpeg)))
 }
@@ -1438,6 +1463,22 @@ pub struct RemovalModes {
     pub medium: bool,
     pub lite: bool,
     pub mode: crate::removal::Mode,
+}
+
+/// The Render setting (Auto / GPU / CPU), the GPU found and why a render last stayed on the CPU.
+#[tauri::command]
+pub fn render_status() -> crate::gpu::Status {
+    crate::gpu::status()
+}
+
+/// Sets the Render setting; it applies from the next render.
+#[tauri::command]
+pub fn set_render_mode(mode: crate::gpu::RenderMode) -> crate::gpu::Status {
+    crate::gpu::set_mode(mode);
+    if mode != crate::gpu::RenderMode::Cpu {
+        crate::gpu::warm_up();
+    }
+    crate::gpu::status()
 }
 
 #[tauri::command]

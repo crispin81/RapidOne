@@ -1,6 +1,6 @@
 [package]
 name = "rapidone"
-version = "1.0.0"
+version = "1.1.0"
 description = "RapidOne RAW editor"
 authors = ["Chris Cork Photography"]
 edition = "2021"
@@ -33,6 +33,17 @@ rayon = "1"
 flate2 = "1"
 # 16-bit TIFFs: the hand-off to RapidRetouch (handoff.rs) and examples/chartkit.rs. Already in the build via `image`. MIT.
 tiff = "0.11"
+# The render engine on the GPU (gpu/): Metal, Vulkan or DirectX 12. MIT OR Apache-2.0; everything it
+# pulls in is MIT, Apache-2.0, Zlib, ISC, BSD-2-Clause, Unlicense or Unicode-3.0 (checked 25 Oct 2026).
+# No OpenGL or browser back ends: without Metal / Vulkan / DirectX 12 the CPU engine renders.
+wgpu = { version = "=30.0.1", default-features = false, features = ["std", "parking_lot", "dx12", "metal", "vulkan", "wgsl"] }
+# JPEG for the viewer's frames, in strips on all cores (jpeg.rs). MIT OR Apache-2.0 (its DCT from the
+# IJG's libjpeg, IJG licence: permissive, credited in About).
+jpeg-encoder = "0.6"
+# Waits on wgpu's start-up calls (MIT OR Apache-2.0).
+pollster = "0.4"
+# The GPU's buffers as bytes (already in the tree via image; Zlib OR Apache-2.0 OR MIT).
+bytemuck = "1"
 # ONNX Runtime, for the subject mask (BiRefNet): MIT OR Apache-2.0; ONNX Runtime itself is MIT.
 ort = { version = "=2.0.0-rc.14", default-features = false, features = ["std", "download-binaries", "tls-native", "copy-dylibs", "api-31"] }
 
@@ -52,6 +63,8 @@ ort = { version = "=2.0.0-rc.14", default-features = false, features = ["directm
 ort = { version = "=2.0.0-rc.14", default-features = false, features = ["webgpu"] }
 # malloc_trim: freed memory back to the system (memtrim.rs). MIT / Apache-2.0.
 libc = "0.2"
+# Touchpad pinch taken off WebKitGTK (pinch.rs): the GTK the webview is built on. MIT, already in the tree.
+gtk = "0.18"
 
 # Apple Silicon Macs: ONNX Runtime with CoreML, so AI noise reduction runs on the Mac's graphics
 # (ONNX Runtime ships CoreML builds for Apple Silicon only; Intel Macs stay on the CPU).

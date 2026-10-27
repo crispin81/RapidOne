@@ -18,9 +18,9 @@ const EASE: f32 = 2.2;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct VignetteMap {
-    w: usize,
-    h: usize,
-    data: Vec<f32>,
+    pub(crate) w: usize,
+    pub(crate) h: usize,
+    pub(crate) data: Vec<f32>,
 }
 
 impl VignetteMap {

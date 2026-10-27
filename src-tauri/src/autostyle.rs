@@ -121,7 +121,7 @@ pub fn save(style: &Style, path: &Path) -> Result<(), String> {
     std::fs::rename(&tmp, path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// The style file name for a style name ("Brownies" -> autostyle-brownies.json).
+/// The style file name for a style name ("Weddings" -> autostyle-weddings.json).
 pub fn file_name(name: &str) -> String {
     let mut slug = String::new();
     for c in name.trim().chars().flat_map(char::to_lowercase) {
@@ -903,8 +903,8 @@ mod tests {
 
     #[test]
     fn style_file_names() {
-        assert_eq!(file_name("Brownies"), "autostyle-brownies.json");
-        assert_eq!(file_name("  Sam's  Brownies! "), "autostyle-sam-s-brownies.json");
+        assert_eq!(file_name("Weddings"), "autostyle-weddings.json");
+        assert_eq!(file_name("  Sam's  Weddings! "), "autostyle-sam-s-weddings.json");
         assert_eq!(file_name("***"), "autostyle-style.json");
     }
 

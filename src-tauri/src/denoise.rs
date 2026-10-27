@@ -78,8 +78,14 @@ fn fastest_gpu(env: &ort::environment::Environment, path: &std::path::Path) -> O
         let Some(s) = build(env, path, Some(device)) else { continue };
         let s = Mutex::new(s);
         let tile = vec![0.5f32; 3 * TILE * TILE];
-        // A warm-up run; a device that is clearly slow (an integrated chip can
-        // be slower than the CPU) is not timed further.
+        // A first run that isn't timed: it can include compiling the model for the
+        // device (CoreML on a Mac: 20 s or more the first time, which put Denoise on
+        // the CPU for the whole session, 25 Oct). Then a warm-up run; a device that
+        // is clearly slow (an integrated chip can be slower than the CPU) is not
+        // timed further.
+        if run_tile(&s, tile.clone()).is_none() {
+            continue;
+        }
         let warm = std::time::Instant::now();
         if run_tile(&s, tile.clone()).is_none() || warm.elapsed().as_secs_f32() > 0.25 {
             continue;

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "resources": {
+      "windows-lib/msvcp140.dll": "msvcp140.dll",
+      "windows-lib/msvcp140_1.dll": "msvcp140_1.dll",
+      "windows-lib/vcruntime140.dll": "vcruntime140.dll",
+      "windows-lib/vcruntime140_1.dll": "vcruntime140_1.dll"
+    }
+  }
+}

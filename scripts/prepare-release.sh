@@ -44,4 +44,17 @@ bash "$tmp/scripts/fetch-uv.sh" "$target"
 mkdir -p src-tauri/binaries
 cp "$tmp"/src-tauri/binaries/uv-"$target"* src-tauri/binaries/
 
+# Windows: Microsoft's C++ runtime beside RapidOne.exe (tauri.release.windows.conf.json). ONNX Runtime,
+# built into the exe, needs msvcp140*.dll / vcruntime140*.dll, which aren't part of Windows: a PC without
+# the Visual C++ Redistributable couldn't start RapidOne. Microsoft allows shipping them with an app
+# ("app-local"); taken from Visual Studio's own redistributable folder.
+if [[ "$target" == *windows-msvc ]]; then
+  crt="$(ls -d "/c/Program Files (x86)/Microsoft Visual Studio/"*/*/VC/Redist/MSVC/*/x64/Microsoft.VC14*.CRT          "/c/Program Files/Microsoft Visual Studio/"*/*/VC/Redist/MSVC/*/x64/Microsoft.VC14*.CRT 2>/dev/null | sort | tail -1 || true)"
+  [ -n "$crt" ] || { echo "Visual Studio's C++ redistributable folder not found (VC/Redist/MSVC/*/x64/Microsoft.VC14*.CRT)" >&2; exit 1; }
+  rm -rf src-tauri/windows-lib
+  mkdir -p src-tauri/windows-lib
+  for f in msvcp140.dll msvcp140_1.dll vcruntime140.dll vcruntime140_1.dll; do cp "$crt/$f" src-tauri/windows-lib/; done
+  echo "C++ runtime from $crt"
+fi
+
 echo "Release files staged for $target (RapidRetouch engine from $module)."

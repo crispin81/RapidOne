@@ -323,6 +323,27 @@ export function removalAvailable(): Promise<boolean> {
   return invoke("removal_available");
 }
 
+/** Where renders run (the Render setting): the GPU if usable, else the CPU (Auto); the GPU, saying
+ *  when it falls back (GPU); always the CPU (CPU). */
+export type RenderMode = "auto" | "gpu" | "cpu";
+
+/** The Render setting, the GPU found, whether the last render ran on it, and why not if it didn't. */
+export interface RenderStatus {
+  mode: RenderMode;
+  adapter: string | null;
+  onGpu: boolean;
+  note: string | null;
+}
+
+export function renderStatus(): Promise<RenderStatus> {
+  return invoke("render_status");
+}
+
+/** Sets the Render setting; the next render uses it (no restart). */
+export function setRenderMode(mode: RenderMode): Promise<RenderStatus> {
+  return invoke("set_render_mode", { mode });
+}
+
 export type RemovalMode = "large" | "medium" | "lite";
 
 /** The removers installed - Large (FLUX.2 Klein + SAM 3), Medium (RORem +

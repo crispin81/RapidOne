@@ -18,6 +18,10 @@
       "retouch-engine/README.md": "engine/README.md",
       "retouch-engine/src/": "engine/src/"
     },
+    "macOS": {
+      "minimumSystemVersion": "13.4",
+      "signingIdentity": "-"
+    },
     "linux": {
       "deb": {
         "files": {

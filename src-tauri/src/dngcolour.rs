@@ -188,11 +188,11 @@ fn apply_table(t: &HsvTable, rgb: [f32; 3]) -> [f32; 3] {
 
 /// A tone curve through (x, y) points on 0..1, as a lookup table.
 pub struct Curve {
-    lut: Vec<f32>,
+    pub(crate) lut: Vec<f32>,
 }
 
 impl Curve {
-    const SIZE: usize = 4096;
+    pub(crate) const SIZE: usize = 4096;
 
     /// Piecewise-linear through dense points (a .dcp's 64-point curve).
     pub fn linear(points: &[(f32, f32)]) -> Curve {
@@ -342,11 +342,11 @@ pub struct LookOptions {
 /// Everything needed to render a photo with a profile, prepared once.
 pub struct ProfileRender {
     /// Scene (linear Rec.2020, as-shot balanced) -> linear ProPhoto.
-    to_prophoto: Mat3,
-    hue_sat_map: Option<HsvTable>,
-    look_tables: Vec<HsvTable>,
-    tone: Curve,
-    look_curve: Option<Curve>,
+    pub(crate) to_prophoto: Mat3,
+    pub(crate) hue_sat_map: Option<HsvTable>,
+    pub(crate) look_tables: Vec<HsvTable>,
+    pub(crate) tone: Curve,
+    pub(crate) look_curve: Option<Curve>,
 }
 
 impl ProfileRender {

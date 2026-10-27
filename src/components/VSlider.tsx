@@ -194,7 +194,7 @@ export default function VSlider({ def, value, neutral, active, showName, onChang
           >
             {/* Colour-scale tracks (Temperature, Tint) show the scale instead of a gold fill, as in RapidRetouch. */}
             {!def.trackGradient && (
-              // Raised above its neutral: Tron orange; lowered: cyan.
+              // Raised above its neutral: neon orange; lowered: cyan.
               <div
                 className={`vslider__fill${fraction > neutralFraction ? " vslider__fill--plus" : ""}`}
                 style={{ bottom: `${fillLow * 100}%`, height: `${(fillHigh - fillLow) * 100}%` }}

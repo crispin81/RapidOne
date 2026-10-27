@@ -231,10 +231,17 @@ fn write_tiff(path: &Path, img: &image::ImageBuffer<image::Rgb<u16>, Vec<u16>>) 
     encoder.write_image::<RGB16>(img.width(), img.height(), img.as_raw()).map_err(|e| e.to_string())
 }
 
+/// Encoded in strips on all cores (`jpeg`), colour at full size (4:4:4). `jpeg-encoder`'s quality 99
+/// is what the image crate's quality 100 used to write here: on a 24 MP export (S5 II, 26 Oct) 16 MB
+/// against 15, mean error 0.61 against 0.62 levels, in 0.1 s against 0.66 s on one core. Its own 100
+/// is a little truer (0.45) but half as big again (22 MB). `examples/frame_cost.rs` measures them.
+const EXPORT_JPEG_QUALITY: u8 = 99;
+
 fn write_jpeg(path: &Path, img: &image::RgbImage) -> Result<(), String> {
-    let out = BufWriter::new(File::create(path).map_err(|e| e.to_string())?);
-    let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(out, 100);
-    encoder.encode_image(img).map_err(|e| e.to_string())
+    let bytes = crate::jpeg::encode(img.as_raw(), img.width(), img.height(), EXPORT_JPEG_QUALITY)?;
+    let mut out = BufWriter::new(File::create(path).map_err(|e| e.to_string())?);
+    std::io::Write::write_all(&mut out, &bytes).map_err(|e| e.to_string())?;
+    std::io::Write::flush(&mut out).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

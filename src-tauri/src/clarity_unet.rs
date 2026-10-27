@@ -7,10 +7,10 @@ use std::sync::OnceLock;
 /// Trained on Lightroom's finished renders (input) and Lightroom's Clarity +100 renders (target) only.
 static WEIGHTS: &[u8] = include_bytes!("../models/clarity_unet_disp.bin");
 
-struct Conv { w: Vec<f32>, b: Vec<f32>, cin: usize, cout: usize, k: usize, stride: usize }
-struct Lin { w: Vec<f32>, b: Vec<f32>, n_in: usize, n_out: usize }
+pub(crate) struct Conv { pub(crate) w: Vec<f32>, pub(crate) b: Vec<f32>, pub(crate) cin: usize, pub(crate) cout: usize, pub(crate) k: usize, pub(crate) stride: usize }
+pub(crate) struct Lin { pub(crate) w: Vec<f32>, pub(crate) b: Vec<f32>, pub(crate) n_in: usize, pub(crate) n_out: usize }
 pub struct UNet {
-    e0: [Conv; 2], downs: Vec<Conv>, encs: Vec<Conv>, g1: Lin, g2: Lin, ups: Vec<[Conv; 2]>, out: Conv,
+    pub(crate) e0: [Conv; 2], pub(crate) downs: Vec<Conv>, pub(crate) encs: Vec<Conv>, pub(crate) g1: Lin, pub(crate) g2: Lin, pub(crate) ups: Vec<[Conv; 2]>, pub(crate) out: Conv,
 }
 
 struct Reader<'a> { d: &'a [u8], at: usize }
@@ -129,9 +129,9 @@ fn quantile(sorted: &[f32], f: f32) -> f32 {
     sorted[i] + (sorted[(i + 1).min(sorted.len() - 1)] - sorted[i]) * fr
 }
 
-/// ln gain for every pixel of a w x h scene-linear luminance image (row-major).
-pub fn ln_gain(net: &UNet, y0: &[f32], w: usize, h: usize) -> Vec<f32> {
-    let p_prep = crate::prof::span("      net input");
+/// The network's input for a w x h luminance image: two planes, padded to multiples of 32 (their
+/// width and height returned too).
+pub(crate) fn net_input(y0: &[f32], w: usize, h: usize) -> (Vec<f32>, usize, usize) {
     let mut s: Vec<f32> = y0.iter().step_by(7).map(|&v| v.max(1e-5)).collect();
     s.sort_by(|a, b| a.total_cmp(b));
     let lp99 = quantile(&s, 0.99).ln();
@@ -144,6 +144,13 @@ pub fn ln_gain(net: &UNet, y0: &[f32], w: usize, h: usize) -> Vec<f32> {
             d[pw * ph + y * pw + x] = v.clamp(0.0, 4.0).sqrt();
         }
     }
+    (d, pw, ph)
+}
+
+/// ln gain for every pixel of a w x h scene-linear luminance image (row-major).
+pub fn ln_gain(net: &UNet, y0: &[f32], w: usize, h: usize) -> Vec<f32> {
+    let p_prep = crate::prof::span("      net input");
+    let (d, pw, ph) = net_input(y0, w, h);
     let x = T { c: 2, h: ph, w: pw, d };
     drop(p_prep);
     let p_enc = crate::prof::span("      net encoder");
@@ -176,7 +183,7 @@ pub fn ln_gain(net: &UNet, y0: &[f32], w: usize, h: usize) -> Vec<f32> {
 
 /// Lift in L* at Clarity +100 per decile of display lightness (centres 5, 15, ..., 95) that the display-domain network needs to match Lightroom's mean
 /// change on 150 held-out real RAW photos (`toolmatch BASE=lr VISUAL=1`, DECILES line, Lightroom change minus ours).
-const TONE_CORR: [f32; 10] = [-0.43, -1.08, -1.18, -0.75, -0.29, -0.10, 0.34, 0.09, 0.21, 0.40];
+pub(crate) const TONE_CORR: [f32; 10] = [-0.43, -1.08, -1.18, -0.75, -0.29, -0.10, 0.34, 0.09, 0.21, 0.40];
 pub fn tone_correction(lstar: f32) -> f32 {
     let t = ((lstar - 5.0) / 10.0).clamp(0.0, 9.0);
     let (i, f) = (t.floor() as usize, t - t.floor());

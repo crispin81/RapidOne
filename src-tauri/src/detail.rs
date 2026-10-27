@@ -20,13 +20,17 @@ use rayon::prelude::*;
 /// picture at the same Amount (RMS change in linear brightness over the
 /// kit's most detailed crops, median of 12 photos; sharpen_strength.py, 16 Oct):
 /// the first fit (2.2, 1.3) was 30-35% weaker than Lightroom.
-const RL_SIGMA: f32 = 0.7;
-const RL_ROUNDS: usize = 20;
-const RL_HALO: f32 = 0.5;
-const RL_G: f32 = 2.873;
-const RL_P: f32 = 1.201;
+pub(crate) const RL_SIGMA: f32 = 0.7;
+pub(crate) const RL_ROUNDS: usize = 20;
+pub(crate) const RL_HALO: f32 = 0.5;
+pub(crate) const RL_G: f32 = 2.873;
+pub(crate) const RL_P: f32 = 1.201;
 /// Smallest sigma used on a shrunken picture (below it the effect vanishes).
-const RL_MIN_SIGMA: f32 = 0.45;
+pub(crate) const RL_MIN_SIGMA: f32 = 0.45;
+
+/// Grain's strength at 100, and its share at black / white and the extra at mid-grey.
+pub(crate) const GRAIN_AMOUNT: f32 = 0.12;
+pub(crate) const GRAIN_MID: [f32; 2] = [0.35, 0.65];
 
 /// A picture's channel type: 8-bit (the viewer) or 16-bit (the hand-off to
 /// RapidRetouch, TIFF export).
@@ -119,11 +123,17 @@ fn lin_to_srgb(v: f32) -> f32 {
 /// the rows the vertical taps reach above and below it) goes into a small buffer that stays in cache,
 /// rather than a whole-picture buffer written out to memory and read back (sharpening's twenty rounds
 /// were held up by memory, 24 Oct). Each value is summed exactly as before.
-fn gaussian_rows(src: &[f32], w: usize, h: usize, sigma: f32, finish: impl Fn(usize, &[f32]) + Sync) {
+/// The Gaussian's taps (2r + 1, summing to 1) and its radius r, for `sigma`.
+pub(crate) fn gaussian_taps(sigma: f32) -> (Vec<f32>, usize) {
     let r = (3.0 * sigma).ceil().max(1.0) as isize;
     let k: Vec<f32> = (-r..=r).map(|x| (-((x * x) as f32) / (2.0 * sigma * sigma)).exp()).collect();
     let sum: f32 = k.iter().sum();
-    let k: Vec<f32> = k.iter().map(|v| v / sum).collect();
+    (k.iter().map(|v| v / sum).collect(), r as usize)
+}
+
+fn gaussian_rows(src: &[f32], w: usize, h: usize, sigma: f32, finish: impl Fn(usize, &[f32]) + Sync) {
+    let (k, r) = gaussian_taps(sigma);
+    let r = r as isize;
     let mirror = |i: isize, n: usize| -> usize {
         let n = n as isize;
         let i = if i < 0 { -i } else if i >= n { 2 * n - 2 - i } else { i };
@@ -294,10 +304,10 @@ where
     if grain > 0.0 {
         let raw: Vec<f32> = (0..w * h).map(|i| hash_noise((i % w) as u32, (i / w) as u32)).collect();
         let soft = blur(&raw, w, h, 1);
-        let amount = grain / 100.0 * 0.12;
+        let amount = grain / 100.0 * GRAIN_AMOUNT;
         for i in 0..y.len() {
             let mid = 4.0 * y[i].clamp(0.0, 1.0) * (1.0 - y[i].clamp(0.0, 1.0));
-            y[i] += soft[i] * amount * (0.35 + 0.65 * mid);
+            y[i] += soft[i] * amount * (GRAIN_MID[0] + GRAIN_MID[1] * mid);
         }
     }
 

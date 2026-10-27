@@ -7,9 +7,9 @@
 //!
 //! Where Python and the models live is machine-specific, so it's read from
 //! `klein.json` in a models folder (git-ignored):
-//!   {"python": "E:/RapidOne-ai-test/venv/Scripts/python.exe",
-//!    "model": "E:/RapidOne-ai-test/models/FLUX.2-klein-4B",
-//!    "sam": "E:/RapidOne-ai-test/models/sam3.1-comfy/checkpoints/sam3.1_multiplex_fp16.safetensors"}
+//!   {"python": "C:/path/to/venv/Scripts/python.exe",
+//!    "model": "C:/path/to/models/FLUX.2-klein-4B",
+//!    "sam": "C:/path/to/models/sam3.1-comfy/checkpoints/sam3.1_multiplex_fp16.safetensors"}
 //! (A bundled environment and a download button come with the release.)
 //!
 //! GPU memory: the worker (and the models on the card with it) lives only

@@ -19,7 +19,7 @@ pub type Mat3 = [[f32; 3]; 3];
 
 /// Mixer band centres on the (display RGB) hue circle, degrees: red,
 /// orange, yellow, green, aqua, blue, purple, magenta - as in Lightroom.
-const BAND_CENTRES: [f32; 8] = [0.0, 30.0, 60.0, 120.0, 180.0, 240.0, 270.0, 300.0];
+pub(crate) const BAND_CENTRES: [f32; 8] = [0.0, 30.0, 60.0, 120.0, 180.0, 240.0, 270.0, 300.0];
 
 /// Rec.2020 luminance weights.
 const LUMA: [f32; 3] = [0.2627, 0.6780, 0.0593];
@@ -176,7 +176,7 @@ pub struct ToolTuning {
     pub cal_hue_rot: f32,
     /// How each Fine tuning slider's strength grows with its position: the
     /// fraction moved is (|slider| / 100) ^ pow (1 = in proportion). Measured
-    /// on Chris's brownies moves (red hue +25, blue sat -15, ...): Lightroom's
+    /// on Chris's food moves (red hue +25, blue sat -15, ...): Lightroom's
     /// small saturation cuts do more, and small hue moves less, than a line
     /// through the +-100 measurements.
     pub cal_hue_pow: f32,
@@ -759,22 +759,22 @@ fn apply3(m: &Mat3, v: [f32; 3]) -> [f32; 3] {
 // Darkening: linear brightness x (1 - s f)^K, eased on bright parts;
 // lightening: 1 - (1 - y)(1 - s f)^K_PLUS (dark parts lift most).
 // f = smoothstep(r; centre -/+ half)^gamma, all three from Midpoint / Feather.
-const VIG_K: f32 = 3.524;
-const VIG_K_PLUS: f32 = 0.547;
-const VIG_CENTRE: [f32; 3] = [0.9996, 0.3364, 0.0151];
-const VIG_HALF: [f32; 3] = [0.2530, 0.5566, -0.3808];
-const VIG_GAMMA: [f32; 3] = [-0.2104, 0.3178, 0.0908];
+pub(crate) const VIG_K: f32 = 3.524;
+pub(crate) const VIG_K_PLUS: f32 = 0.547;
+pub(crate) const VIG_CENTRE: [f32; 3] = [0.9996, 0.3364, 0.0151];
+pub(crate) const VIG_HALF: [f32; 3] = [0.2530, 0.5566, -0.3808];
+pub(crate) const VIG_GAMMA: [f32; 3] = [-0.2104, 0.3178, 0.0908];
 /// Roundness +: towards a circle (as before), this much of the way.
-const VIG_ROUND_POS: f32 = 0.2962;
+pub(crate) const VIG_ROUND_POS: f32 = 0.2962;
 /// Roundness -: a p-norm (p = 2 + a x + b x^2, x = -Roundness/100) scaled
 /// out by 1 + c x + d x^2 (the -50 / -100 fits, joined to the oval at 0).
-const VIG_ROUND_P: [f32; 2] = [-1.13, 4.82];
-const VIG_ROUND_SCALE: [f32; 2] = [-0.13, 0.356];
+pub(crate) const VIG_ROUND_P: [f32; 2] = [-1.13, 4.82];
+pub(crate) const VIG_ROUND_SCALE: [f32; 2] = [-0.13, 0.356];
 /// Easing on bright parts by brightness (linear luminance at these knots),
 /// at Highlights 0 plus Highlights/100 x the second row.
-const VIG_KNOTS: [f32; 9] = [0.0, 0.05, 0.1, 0.25, 0.4, 0.55, 0.7, 0.85, 1.0];
-const VIG_EASE0: [f32; 9] = [0.2417, -0.2373, -0.1295, 0.1015, 0.2975, 0.4493, 0.5731, 0.7223, 0.8635];
-const VIG_EASE1: [f32; 9] = [-0.1702, -1.6756, -1.2573, -0.1770, 0.0423, 0.1907, 0.2705, 0.2789, 0.3211];
+pub(crate) const VIG_KNOTS: [f32; 9] = [0.0, 0.05, 0.1, 0.25, 0.4, 0.55, 0.7, 0.85, 1.0];
+pub(crate) const VIG_EASE0: [f32; 9] = [0.2417, -0.2373, -0.1295, 0.1015, 0.2975, 0.4493, 0.5731, 0.7223, 0.8635];
+pub(crate) const VIG_EASE1: [f32; 9] = [-0.1702, -1.6756, -1.2573, -0.1770, 0.0423, 0.1907, 0.2705, 0.2789, 0.3211];
 
 /// The vignette's (centre, half width, gamma) from Midpoint and Feather.
 fn vig_shape(s: &ToolSettings) -> (f32, f32, f32) {
@@ -942,37 +942,37 @@ fn band_weights(hue: f32, width: f32, shift: &[f32; 8]) -> [f32; 8] {
 
 /// Everything prepared once per render for the display-side tools.
 pub struct Prepared {
-    mixer: Option<[[f32; 3]; 8]>,
+    pub(crate) mixer: Option<[[f32; 3]; 8]>,
     /// Luminosity, RGB, red, green, blue.
-    curves: Option<[Option<Curve>; 5]>,
+    pub(crate) curves: Option<[Option<Curve>; 5]>,
     /// The parametric (region) curve, on gamma-2.2 ProPhoto.
-    parametric: Option<Curve>,
-    grade: Option<GradeSettings>,
+    pub(crate) parametric: Option<Curve>,
+    pub(crate) grade: Option<GradeSettings>,
     /// The grade's settings worked out once (`GradePrep`): the whole grade, and the fitted part the
     /// measured table is used with (its Shadows and Highlights tints; None when they're neutral).
-    grade_full: Option<GradePrep>,
-    grade_fitted: Option<GradePrep>,
-    vignette: f32,
+    pub(crate) grade_full: Option<GradePrep>,
+    pub(crate) grade_fitted: Option<GradePrep>,
+    pub(crate) vignette: f32,
     /// The adaptive vignette's amount (-100..100).
-    adaptive: f32,
+    pub(crate) adaptive: f32,
     /// The legacy vignette's fade (`vig_shape`: centre and half width on
     /// the radius, 1 = the frame's edge oval; gamma), and its roundness
     /// (-1 squarer .. 1 circular).
-    vig_centre: f32,
-    vig_half: f32,
-    vig_gamma: f32,
-    vig_round: f32,
+    pub(crate) vig_centre: f32,
+    pub(crate) vig_half: f32,
+    pub(crate) vig_gamma: f32,
+    pub(crate) vig_round: f32,
     /// 0..1: how much bright parts are spared a darkening vignette.
-    vig_highlights: f32,
+    pub(crate) vig_highlights: f32,
     /// Width / height, for a circular vignette.
     pub aspect: f32,
     /// Subject-aware vignette: how much to darken each part of the frame.
-    vig_map: Option<std::sync::Arc<crate::subject::VignetteMap>>,
-    to_srgb: Mat3,
-    from_srgb: Mat3,
-    to_prophoto: Mat3,
-    from_prophoto: Mat3,
-    t: ToolTuning,
+    pub(crate) vig_map: Option<std::sync::Arc<crate::subject::VignetteMap>>,
+    pub(crate) to_srgb: Mat3,
+    pub(crate) from_srgb: Mat3,
+    pub(crate) to_prophoto: Mat3,
+    pub(crate) from_prophoto: Mat3,
+    pub(crate) t: ToolTuning,
 }
 
 fn curve_of(points: &[[f32; 2]], t: &ToolTuning) -> Option<Curve> {
@@ -1227,15 +1227,15 @@ pub fn parametric_shape(amounts: [f32; 4], splits: [f32; 3]) -> impl Fn(f32) -> 
 /// The encoding the curves work on: a power `g` with an sRGB-style straight
 /// toe (offset `a`; 0 = pure power, sRGB itself is 2.4 / 0.055).
 #[derive(Clone, Copy)]
-struct Encoding {
-    g: f32,
-    a: f32,
-    x0: f32,
-    slope: f32,
+pub(crate) struct Encoding {
+    pub(crate) g: f32,
+    pub(crate) a: f32,
+    pub(crate) x0: f32,
+    pub(crate) slope: f32,
 }
 
 impl Encoding {
-    fn new(g: f32, a: f32) -> Self {
+    pub(crate) fn new(g: f32, a: f32) -> Self {
         if a <= 0.0 {
             return Self { g, a: 0.0, x0: 0.0, slope: 0.0 };
         }
@@ -1356,8 +1356,8 @@ fn hsl_to_rgb([h, s, l]: [f32; 3]) -> [f32; 3] {
 /// ProPhoto RGB colour wheel (gamma-encoded), luminance as an exposure-like
 /// gain that grows with saturation, then saturation in OKLab.
 /// The chart's saturation and brightness levels (`examples/chartkit.rs`).
-const SURF_S: [f32; 8] = [0.08, 0.16, 0.28, 0.42, 0.58, 0.74, 0.88, 1.0];
-const SURF_V: [f32; 4] = [0.25, 0.45, 0.65, 0.85];
+pub(crate) const SURF_S: [f32; 8] = [0.08, 0.16, 0.28, 0.42, 0.58, 0.74, 0.88, 1.0];
+pub(crate) const SURF_V: [f32; 4] = [0.25, 0.45, 0.65, 0.85];
 
 /// A Luminance correction surface read bilinearly at saturation `s` and value
 /// `v` (held at the edges).
@@ -1601,26 +1601,26 @@ fn fitted_grade(gr: &GradeSettings) -> GradeSettings {
     GradeSettings { shadows: tint_only(&gr.shadows), highs: tint_only(&gr.highs), mids: none, global: GradeRange { sat: 0.0, lum: 0.0, ..gr.global }, ..*gr }
 }
 
-struct GradePrep {
-    g: GradeSettings,
+pub(crate) struct GradePrep {
+    pub(crate) g: GradeSettings,
     /// 2 ^ (-Balance / 100 x `grade_balance`).
-    bend: f32,
+    pub(crate) bend: f32,
     /// Blending's power on each range's reach.
-    e: f32,
-    ref_e: [f32; 3],
-    peaks: [f32; 4],
-    tints: [Option<TintPrep>; 4],
+    pub(crate) e: f32,
+    pub(crate) ref_e: [f32; 3],
+    pub(crate) peaks: [f32; 4],
+    pub(crate) tints: [Option<TintPrep>; 4],
 }
 
-struct TintPrep {
-    dir: [f32; 2],
-    light: f32,
+pub(crate) struct TintPrep {
+    pub(crate) dir: [f32; 2],
+    pub(crate) light: f32,
     /// Saturation / 100 x `grade_sat` x the hue's and the table's gains (the start of `k_unit`).
-    k_pre: f32,
-    sat_shape: f32,
-    pushed: [f32; 3],
-    pure: [f32; 3],
-    mean: f32,
+    pub(crate) k_pre: f32,
+    pub(crate) sat_shape: f32,
+    pub(crate) pushed: [f32; 3],
+    pub(crate) pure: [f32; 3],
+    pub(crate) mean: f32,
 }
 
 impl GradePrep {
@@ -1891,7 +1891,7 @@ fn blur(src: &[f32], w: usize, h: usize, r: usize) -> Vec<f32> {
 
 /// OKLab a/b to CIELAB a*/b* sizes, roughly (a saturated red is a* 80 and
 /// OKLab a 0.22), so Texture's colour settings read in familiar units.
-const AB_UNITS: f32 = 360.0;
+pub(crate) const AB_UNITS: f32 = 360.0;
 
 /// A blur at a fractional radius: the two nearest whole radii, blended.
 fn blur_f(src: &[f32], w: usize, h: usize, r: f32) -> Vec<f32> {
@@ -2029,7 +2029,7 @@ fn dehaze(
 
 /// Dehaze's measures of the whole photo: its brightness, the haze colour and
 /// the smoothed dark-channel map.
-fn dehaze_measure(px: &[[f32; 3]], dims: (usize, usize), t: &ToolTuning) -> DehazeMeasured {
+pub(crate) fn dehaze_measure(px: &[[f32; 3]], dims: (usize, usize), t: &ToolTuning) -> DehazeMeasured {
     use rayon::prelude::*;
     let g = t.dz_gamma;
     let enc = |v: f32| v.max(0.0).powf(1.0 / g);
@@ -2237,7 +2237,7 @@ pub fn local_laplacian_remap(img: &[f32], w: usize, h: usize, refs: &[f32], rema
 /// (lightness and its ratio to the local mean at eight scales, local spread, local means, the photo's histogram
 /// quantiles, fine detail and spread of the blurred lightness), computed at about 1000 px like the training data
 /// and upsampled. See examples/clarnn.rs for the training and the feature definitions.
-struct NetWeights {
+pub(crate) struct NetWeights {
     mu: &'static [f32],
     sd: &'static [f32],
     w1: &'static [f32],
@@ -2248,21 +2248,24 @@ struct NetWeights {
     b3: &'static [f32],
 }
 
-fn clarity_net_positive() -> NetWeights {
+pub(crate) fn clarity_net_positive() -> NetWeights {
     use crate::clarity_net::*;
     NetWeights { mu: &MU, sd: &SD, w1: &W1, b1: &B1, w2: &W2, b2: &B2, w3: &W3, b3: &B3 }
 }
 
-fn clarity_net_negative() -> NetWeights {
+pub(crate) fn clarity_net_negative() -> NetWeights {
     use crate::clarity_net_neg::*;
     NetWeights { mu: &MU, sd: &SD, w1: &W1, b1: &B1, w2: &W2, b2: &B2, w3: &W3, b3: &B3 }
 }
 
+/// The block size of Clarity's lightness network's small copy of a `w` x `h` picture.
+pub(crate) fn clarity_net_factor(w: usize, h: usize) -> usize {
+    ((w.max(h) as f32 / 1000.0).round() as usize).max(1)
+}
+
 fn clarity_net_change(px: &[[f32; 3]], w: usize, h: usize, net: &NetWeights) -> Vec<f32> {
-    use crate::clarity_net::NF;
     use rayon::prelude::*;
-    let long = w.max(h);
-    let f = ((long as f32 / 1000.0).round() as usize).max(1);
+    let f = clarity_net_factor(w, h);
     let (lw, lh) = (w.div_ceil(f), h.div_ceil(f));
     let yrow = crate::pipeline::REC2020_TO_XYZ[1];
     // Luminance and CIE L* on the small grid (block average of linear light).
@@ -2280,6 +2283,31 @@ fn clarity_net_change(px: &[[f32; 3]], w: usize, h: usize, net: &NetWeights) -> 
             ysm[y * lw + x] = s / n;
         }
     }
+    let small = clarity_net_small(&ysm, lw, lh, net);
+    if f == 1 {
+        return small;
+    }
+    // Bilinear upsample to full size.
+    (0..w * h)
+        .into_par_iter()
+        .map(|i| {
+            let (x, y) = (i % w, i / w);
+            let (fx, fy) = ((x as f32 + 0.5) / f as f32 - 0.5, (y as f32 + 0.5) / f as f32 - 0.5);
+            let (x0, y0) = (fx.floor().max(0.0) as usize, fy.floor().max(0.0) as usize);
+            let (x1, y1) = ((x0 + 1).min(lw - 1), (y0 + 1).min(lh - 1));
+            let (tx, ty) = ((fx - x0 as f32).clamp(0.0, 1.0), (fy - y0 as f32).clamp(0.0, 1.0));
+            let a = small[y0 * lw + x0] * (1.0 - tx) + small[y0 * lw + x1] * tx;
+            let b = small[y1 * lw + x0] * (1.0 - tx) + small[y1 * lw + x1] * tx;
+            a * (1.0 - ty) + b * ty
+        })
+        .collect()
+}
+
+/// Clarity's lightness network on the small copy (`ysm`: block averages of the luminance, each
+/// clamped to 0..1, `lw` x `lh`): its change in L* there.
+pub(crate) fn clarity_net_small(ysm: &[f32], lw: usize, lh: usize, net: &NetWeights) -> Vec<f32> {
+    use crate::clarity_net::NF;
+    use rayon::prelude::*;
     let lstar: Vec<f32> = ysm.iter().map(|&y| if y > 0.008856 { 116.0 * y.cbrt() - 16.0 } else { 903.3 * y }).collect();
     let yp: Vec<f32> = lstar.iter().map(|&l| { let q = (l.clamp(0.0, 100.0) + 16.0) / 116.0; q * q * q + 1e-3 }).collect();
     let sq: Vec<f32> = lstar.iter().map(|l| l * l).collect();
@@ -2398,23 +2426,7 @@ fn clarity_net_change(px: &[[f32; 3]], w: usize, h: usize, net: &NetWeights) -> 
             out
         })
         .collect();
-    if f == 1 {
-        return small;
-    }
-    // Bilinear upsample to full size.
-    (0..w * h)
-        .into_par_iter()
-        .map(|i| {
-            let (x, y) = (i % w, i / w);
-            let (fx, fy) = ((x as f32 + 0.5) / f as f32 - 0.5, (y as f32 + 0.5) / f as f32 - 0.5);
-            let (x0, y0) = (fx.floor().max(0.0) as usize, fy.floor().max(0.0) as usize);
-            let (x1, y1) = ((x0 + 1).min(lw - 1), (y0 + 1).min(lh - 1));
-            let (tx, ty) = ((fx - x0 as f32).clamp(0.0, 1.0), (fy - y0 as f32).clamp(0.0, 1.0));
-            let a = small[y0 * lw + x0] * (1.0 - tx) + small[y0 * lw + x1] * tx;
-            let b = small[y1 * lw + x0] * (1.0 - tx) + small[y1 * lw + x1] * tx;
-            a * (1.0 - ty) + b * ty
-        })
-        .collect()
+    small
 }
 
 /// A low-resolution map over the whole photo, read at any place by fractions
@@ -2465,14 +2477,14 @@ impl MapGrid {
 /// What Dehaze measured on the whole photo.
 #[derive(Clone, Debug, Default)]
 pub struct DehazeMeasured {
-    nu: f32,
-    delta: f32,
-    av: [f32; 3],
-    mean_dc: f32,
+    pub(crate) nu: f32,
+    pub(crate) delta: f32,
+    pub(crate) av: [f32; 3],
+    pub(crate) mean_dc: f32,
     /// The smoothed dark-channel map (how hazy each place looks).
-    smooth: MapGrid,
+    pub(crate) smooth: MapGrid,
     /// The same map at full size, while rendering the photo it was measured on.
-    full: Option<Vec<f32>>,
+    pub(crate) full: Option<Vec<f32>>,
 }
 
 /// What Texture / Clarity / Dehaze measured on the whole photo (see
@@ -2480,13 +2492,22 @@ pub struct DehazeMeasured {
 #[derive(Clone, Debug, Default)]
 pub struct DefinitionMeasured {
     /// Clarity's display network: log gain over the photo.
-    clar_gain: Option<MapGrid>,
+    pub(crate) clar_gain: Option<MapGrid>,
     /// Clarity's lightness network: its change in L* over the photo.
-    clar_change: Option<MapGrid>,
-    dehaze: Option<DehazeMeasured>,
+    pub(crate) clar_change: Option<MapGrid>,
+    pub(crate) dehaze: Option<DehazeMeasured>,
+    /// The masks' Texture / Clarity / Dehaze, each tool each way (tool x 2 + 0 up, 1 down): what
+    /// each measured on the whole photo, so slider drags and zoomed-in parts reuse it as the
+    /// sliders' do (render_core_q).
+    pub(crate) masks: Vec<(usize, DefinitionMeasured)>,
 }
 
 impl DefinitionMeasured {
+    /// What the masks' tool `key` measured, when it holds what `one` (that tool alone) needs.
+    pub(crate) fn mask(&self, key: usize, one: &ToolSettings, t: &ToolTuning) -> Option<&DefinitionMeasured> {
+        self.masks.iter().find(|(k, _)| *k == key).map(|(_, m)| m).filter(|m| m.covers(one, t))
+    }
+
     /// Whether it holds what these settings' Clarity and Dehaze need.
     pub fn covers(&self, s: &ToolSettings, t: &ToolTuning) -> bool {
         let clarity_ok = s.clarity == 0.0

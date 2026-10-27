@@ -28,6 +28,18 @@ const TOUCHPAD_STREAM_MS = 400;
  * (226.5 at 1.333x); there a notch is a straight jump of 100 or more.
  */
 const WEBKITGTK = /Linux/.test(navigator.userAgent) && !/Android/.test(navigator.userAgent);
+/** macOS's WebKit: a notch is small and accelerated, so the size test can't tell it from a
+ *  touchpad. But every notch's stream begins with exactly one line, 4.000244 px, straight up or
+ *  down (a fast spin then speeds up: 40, 160, 250...); a touchpad's starts fractional. */
+const MAC_WEBKIT = /Macintosh/.test(navigator.userAgent);
+const MAC_NOTCH = 4.000244140625;
+/** On a Mac, a mouse stream's events zoom at most a step this often (ms), so a fast spin's
+ *  accelerated burst zooms a few steps rather than straight to the limit. */
+const MAC_STEP_MS = 60;
+/** Two parts of the photo (fractions) the same, to a hair. */
+const sameRect = (a: readonly number[], b: readonly number[]) => a.every((v, i) => Math.abs(v - b[i]) < 1e-4);
+/** Windows' WebView2 (Chromium's engine): it skips painting fully transparent layers. */
+const CHROMIUM = /Edg\//.test(navigator.userAgent);
 function isMouseWheel(e: WheelEvent, now: number, touchpadUntil: number): boolean {
   if (e.deltaMode === 1) return true;
   if (now < touchpadUntil) return false;
@@ -103,6 +115,8 @@ interface Props {
   /** Told when the zoomed view is showing full-resolution detail (the
    *  preview under it is hidden, so it needn't render while sliders move). */
   onDetailActive?: (active: boolean) => void;
+  /** Something covers the loupe (the Library's grid): no Before | After buttons over it. */
+  noCompare?: boolean;
 }
 
 /**
@@ -113,9 +127,13 @@ interface Props {
 // `engine`: the engine already rendered contrast and saturation from real RAW
 // data, so the quick CSS versions (only right for the camera-JPEG fallback)
 // are skipped.
-function roughFilter(v: Adjustments, withTables: boolean, engine: boolean): string {
+function roughFilter(v: Adjustments, withTables: boolean, engine: boolean): string | undefined {
   const contrast = engine ? 1 : 1 + v.contrast / 100;
   const saturate = engine ? 1 : 1 + v.saturation / 100;
+  // Nothing to change (the engine's own picture at rest): no filter at all. Even contrast(1)
+  // saturate(1) made Windows' WebView2 draw the photo through its filter path, tile by tile, on
+  // every zoom step: half-drawn squares while zooming quickly (24 Oct).
+  if (!withTables && contrast === 1 && saturate === 1) return undefined;
   const tables = withTables ? "url(#rapidone-tables) " : "";
   return `${tables}contrast(${contrast}) saturate(${saturate})`;
 }
@@ -152,13 +170,51 @@ function TablesFilter({ exposure, curves, grade, id = "rapidone-tables" }: { exp
 /** The resolutions a drag's renders step through (Chris: 20/40/60/80/100%). */
 const DRAG_LEVELS = [0.2, 0.4, 0.6, 0.8, 1];
 
-/** A drag's next resolution from its last frame's time: one level down if slow, one up if quick. */
-export function stepScale(scale: number, ms: number, min: number): number {
-  const levels = DRAG_LEVELS.filter((l) => l >= min - 1e-6);
-  const i = levels.reduce((best, l, j) => (Math.abs(l - scale) < Math.abs(levels[best] - scale) ? j : best), 0);
-  if (ms > 150) return levels[Math.max(0, i - 1)];
-  if (ms < 72) return levels[Math.min(levels.length - 1, i + 1)];
-  return levels[i];
+/** A frame slower than this misses the response speed: the drag drops a resolution level. */
+const DRAG_SLOW_MS = 150;
+/** Quicker than this while a drag is still finding its level: one level up is tried. */
+const DRAG_QUICK_MS = 72;
+/** A drag's first frames find its level; after that it stays put. */
+const DRAG_PROBE_FRAMES = 3;
+
+/**
+ * A drag's render resolution (DRAG_LEVELS). Its first frames find the level that keeps up (down a
+ * level for a slow frame, up for a quick one); then it settles there until the slider is let go,
+ * dropping further only if frames miss the response speed, never back up. Re-deciding on every frame
+ * (as before) hopped between levels on Clarity / Vibrance renders near the limits, and each hop
+ * changed the picture's softness and placement a little: it wobbled (Chris, 27 Oct). The next drag
+ * starts from the level this one settled on.
+ */
+export class DragScale {
+  private frames = 0;
+  // The first frame at a new level also makes the photo's copy at that size (once): not counted, or
+  // that one-off cost read as slow and each drop led to another, down to the smallest level.
+  private warming = false;
+  constructor(
+    public scale: number,
+    private readonly min: number,
+  ) {}
+  /** A drag's frame took `ms`. */
+  frame(ms: number): void {
+    const levels = DRAG_LEVELS.filter((l) => l >= this.min - 1e-6);
+    const i = levels.reduce((best, l, j) => (Math.abs(l - this.scale) < Math.abs(levels[best] - this.scale) ? j : best), 0);
+    if (this.warming) {
+      this.warming = false;
+      return;
+    }
+    const probing = this.frames < DRAG_PROBE_FRAMES;
+    this.frames++;
+    const was = this.scale;
+    if (ms > DRAG_SLOW_MS) this.scale = levels[Math.max(0, i - 1)];
+    else if (probing && ms < DRAG_QUICK_MS) this.scale = levels[Math.min(levels.length - 1, i + 1)];
+    else this.scale = levels[i];
+    this.warming = this.scale !== was;
+  }
+  /** The slider was let go: the next drag finds its level again, from this one. */
+  end(): void {
+    this.frames = 0;
+    this.warming = false;
+  }
 }
 
 /**
@@ -196,6 +252,7 @@ export default function Viewer({
   cameraPreview,
   beforePreview = null,
   compareWith = "before",
+  noCompare = false,
   onCompareWith,
   onCompareStart,
   keysActive = false,
@@ -292,11 +349,15 @@ export default function Viewer({
   // viewer), fitted inside the closest frame at the photo's own shape. The
   // shape is the last known one while a new photo's picture is on its way.
   const mainRef = useRef<HTMLDivElement>(null);
-  const [box, setBox] = useState({ w: 1600, h: 900 });
+  // x, y: where the viewer sits in the window, for putting the photo's edges on whole screen pixels.
+  const [box, setBox] = useState({ w: 1600, h: 900, x: 0, y: 0 });
   useEffect(() => {
     const el = mainRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setBox({ w: el.clientWidth || 1, h: el.clientHeight || 1 }));
+    const ro = new ResizeObserver(() => {
+      const r = el.getBoundingClientRect();
+      setBox({ w: el.clientWidth || 1, h: el.clientHeight || 1, x: r.left, y: r.top });
+    });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
@@ -317,6 +378,16 @@ export default function Viewer({
         }
       : { src: photo.thumbBase64, engine: false, pending: true, interactive: false, uncropped: false };
   const [onScreen, setOnScreen] = useState<OnScreen | null>(null);
+  // The newest picture asked for, and the newest put on screen (see the decode below).
+  const decodeSeq = useRef(0);
+  const shownSeq = useRef(0);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const [aspect, setAspect] = useState(3 / 2);
   // The photo the frame's shape was last taken from.
   const aspectPath = useRef<string | null>(null);
@@ -328,17 +399,25 @@ export default function Viewer({
         onScreen.pending !== target.pending ||
         onScreen.interactive !== target.interactive ||
         onScreen.uncropped !== target.uncropped
-      )
+      ) {
+        // This is the newest picture now: a decode still running for an older one mustn't replace it.
+        shownSeq.current = ++decodeSeq.current;
         setOnScreen(target);
+      }
       return;
     }
-    let live = true;
+    // Each picture asked for is numbered, and whichever finishes decoding goes up if it's newer than
+    // what's showing. A newer request never cancels an older decode: while a slider moves, renders
+    // came faster than WebView2 (Windows) decoded them, each cancelled the one before, and the photo
+    // stopped changing (24 Oct). The newest still wins, and a stale one never replaces a newer one.
+    const seq = ++decodeSeq.current;
     const im = new Image();
     im.src = target.src;
     im.decode()
       .catch(() => {})
       .then(() => {
-        if (!live) return;
+        if (seq <= shownSeq.current || !mounted.current) return;
+        shownSeq.current = seq;
         setOnScreen(target);
         // The frame takes the picture's shape as it goes up. A new shape (a crop, the next photo) at
         // once; renders of the same shape at other sizes (a quick half-size one, then the exact one)
@@ -351,9 +430,6 @@ export default function Viewer({
           setAspect((prev) => (samePhoto && Math.abs(next - prev) / prev < 0.005 ? prev : next));
         }
       });
-    return () => {
-      live = false;
-    };
     // target is rebuilt every render; these are what it is.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [target?.src, target?.engine, target?.pending, target?.interactive, target?.uncropped]);
@@ -406,9 +482,18 @@ export default function Viewer({
     const availH = areaH * (1 - (2 * margin) / 100);
     const w = Math.min(availW, availH * aspect);
     const h = w / aspect;
-    const l = ((box.w - w) / 2 / box.w) * 100;
-    const t = ((areaH - h) / 2 / box.h) * 100;
-    return { l, t, r: 100 - l, b: t + (h / box.h) * 100 };
+    // Every edge on a whole screen pixel (from the window's corner: the viewer itself can start part
+    // way into one, e.g. 28 px down at 1.6x). With D65 Glow the frame came out a fraction of a pixel
+    // across, its last row and column part-covered, and the quick colour filter on the photo while a
+    // slider moves turned those part-covered pixels white: a white line at the bottom (27 Oct).
+    const ratio = window.devicePixelRatio || 1;
+    const snapX = (v: number) => Math.round((box.x + v) * ratio) / ratio - box.x;
+    const snapY = (v: number) => Math.round((box.y + v) * ratio) / ratio - box.y;
+    const l = snapX((box.w - w) / 2);
+    const r = snapX((box.w + w) / 2);
+    const t = snapY((areaH - h) / 2);
+    const b = snapY((areaH + h) / 2);
+    return { l: (l / box.w) * 100, t: (t / box.h) * 100, r: (r / box.w) * 100, b: (b / box.h) * 100 };
   })();
   // Where the corridor and halo end: the photo's box, or with the photo clipped to its crop (above),
   // the crop's box within it.
@@ -471,12 +556,17 @@ export default function Viewer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [photo?.path, onScreen?.src, onScreen?.uncropped, settledPicture, zoom?.z, zoom?.cx, zoom?.cy, z100]);
   /** Where the photo sits at zoom z centred on (cx, cy): left, top, width, height in px. */
+  // Zoomed, the photo's edges on whole screen pixels too, as the frame's (photoBox).
   const place = (z: number, cx: number, cy: number) => {
     const w = fitW * z;
     const h = fitH * z;
     const x = w > areaW ? Math.min(Math.max(cx, areaW / 2 / w), 1 - areaW / 2 / w) : 0.5;
     const y = h > areaH ? Math.min(Math.max(cy, areaH / 2 / h), 1 - areaH / 2 / h) : 0.5;
-    return { left: areaW / 2 - x * w, top: areaH / 2 - y * h, w, h, cx: x, cy: y };
+    const left = Math.round((box.x + areaW / 2 - x * w) * dpr) / dpr - box.x;
+    const top = Math.round((box.y + areaH / 2 - y * h) * dpr) / dpr - box.y;
+    const right = Math.round((box.x + left + w) * dpr) / dpr - box.x;
+    const bottom = Math.round((box.y + top + h) * dpr) / dpr - box.y;
+    return { left, top, w: right - left, h: bottom - top, cx: x, cy: y };
   };
   const zoomGeo = useRef({ zoom, place, z100, zMax, zoomable });
   zoomGeo.current = { zoom, place, z100, zMax, zoomable };
@@ -520,6 +610,9 @@ export default function Viewer({
     let pinchEnded = 0;
     // Until when wheel events count as a touchpad's (see `isMouseWheel`).
     let touchpadUntil = 0;
+    // macOS: until when wheel events belong to a mouse notch's stream, and the last step's time.
+    let macMouseUntil = 0;
+    let macLastStep = 0;
     const onWheel = (e: WheelEvent) => {
       if (!zoomGeo.current.zoomable) return;
       // During a WebKit pinch the gesture events do the zooming (in case Ctrl+wheel comes too).
@@ -535,8 +628,20 @@ export default function Viewer({
       const px = e.clientX - r.left;
       const py = e.clientY - r.top;
       const z = zoomGeo.current.zoom?.z ?? 1;
-      const mouseWheel = isMouseWheel(e, performance.now(), touchpadUntil);
-      touchpadUntil = mouseWheel ? 0 : performance.now() + TOUCHPAD_STREAM_MS;
+      const now = performance.now();
+      let mouseWheel: boolean;
+      if (MAC_WEBKIT) {
+        if (e.deltaX === 0 && Math.abs(Math.abs(e.deltaY) - MAC_NOTCH) < 1e-6) macMouseUntil = now + TOUCHPAD_STREAM_MS;
+        mouseWheel = e.deltaX === 0 && !e.ctrlKey && now < macMouseUntil;
+        if (mouseWheel) {
+          macMouseUntil = now + TOUCHPAD_STREAM_MS;
+          if (now - macLastStep < MAC_STEP_MS) return;
+          macLastStep = now;
+        }
+      } else {
+        mouseWheel = isMouseWheel(e, now, touchpadUntil);
+        touchpadUntil = mouseWheel ? 0 : now + TOUCHPAD_STREAM_MS;
+      }
       // A notch zooms a step, Ctrl or not; a touchpad pinch (Ctrl, small amounts) zooms smoothly.
       if (mouseWheel) zoomAtRef.current(z * (e.deltaY < 0 ? 1.25 : 0.8), px, py);
       else if (e.ctrlKey) zoomAtRef.current(z * Math.exp(-e.deltaY * 0.01), px, py);
@@ -624,7 +729,7 @@ export default function Viewer({
   // While dragging: the resolution steps through 100/80/60/40/20% - down a
   // level while frames take over ~0.15 s, up a level when comfortably quicker
   // - kept for the next drag: as sharp as this computer and file allow.
-  const dragScale = useRef(0.8);
+  const dragScale = useRef(new DragScale(0.8, 0.2));
   const needDetail = Boolean(placed && shown && shown.source === "engine" && !shown.pending && placed.w * dpr > shown.width * 1.05);
   const visible: [number, number, number, number] | null = placed
     ? [
@@ -650,7 +755,8 @@ export default function Viewer({
       .then((src) => {
         const ms = performance.now() - started;
         lastDetailMs.current = ms;
-        if (job.interactive) dragScale.current = stepScale(dragScale.current, ms, 0.2);
+        if (job.interactive) dragScale.current.frame(ms);
+        else dragScale.current.end();
         setDetail({ key: job.key, rect: job.rect, src, exposure: job.exposure });
       })
       .catch(() => undefined)
@@ -677,7 +783,7 @@ export default function Viewer({
       wanted.current = null;
       return;
     }
-    const k = interactive ? dragScale.current : 1;
+    const k = interactive ? dragScale.current.scale : 1;
     wanted.current = {
       key: detailKey,
       rect: visible,
@@ -708,7 +814,12 @@ export default function Viewer({
   const detailShown =
     // The latest real render of this photo stays up until the next replaces
     // it: never an approximation, so nothing jumps when the newest lands.
-    detail && placed && needDetail && samePhoto(detail.key) ? detail : null;
+    // Except one made with other settings, outside a drag: zooming in after
+    // a change showed the patch from before it (a second at the old
+    // exposure, 24 Oct), so the soft preview, which is current, shows until
+    // the patch for these settings lands. While a slider moves, the newest
+    // patch stays, or the view would flick between sharp and soft.
+    detail && placed && needDetail && samePhoto(detail.key) && (interactive || detail.key === detailKey) ? detail : null;
   const lastDetail = useRef<{ src: string; rect: [number, number, number, number] } | null>(null);
   const underDetail = useRef<{ src: string; rect: [number, number, number, number] } | null>(null);
   if ((detailShown?.src ?? null) !== (lastDetail.current?.src ?? null)) {
@@ -863,7 +974,7 @@ export default function Viewer({
             </div>
             {/* Before | After, bottom right (as Retouch's): Before is the photo with no edit (as
                 Lightroom's), or the camera's JPEG when a right-click on it says so; \ switches. */}
-            {cameraPreview?.path === photo.path && preview?.source === "engine" && (
+            {!noCompare && cameraPreview?.path === photo.path && preview?.source === "engine" && (
               // Retouch's own Before | After (its classes, so its stylesheet draws both the same), in a
               // box of no size of its own; placed 14px above the bottom panel over the loupe, as
               // Retouch's is above its bar.
@@ -900,7 +1011,10 @@ export default function Viewer({
                 className="viewer__zoomlayer"
                 // Hidden by opacity, not visibility: WebKit keeps painting it, so it's up to date
                 // (after D65 Glow or the window changes the Fit size) when the first zoom shows it.
-                style={{ height: areaH, ...(placed ? undefined : { opacity: 0, pointerEvents: "none" }) }}
+                // Windows' WebView2 (Chromium) skips painting what's fully transparent, so the first
+                // few zooms showed it blank for a frame (a black flicker, 24 Oct): there it's 1%, the
+                // same picture exactly over the photo, unseen but painted.
+                style={{ height: areaH, ...(placed ? undefined : { opacity: CHROMIUM ? 0.01 : 0, pointerEvents: "none" }) }}
                 aria-hidden={placed ? undefined : true}
                 onPointerDown={onZoomPointerDown}
                 onPointerMove={onZoomPointerMove}
@@ -925,8 +1039,11 @@ export default function Viewer({
                 {detailShown && Math.abs(detailExposure) > 1e-6 && (
                   <TablesFilter id="rapidone-detail-tables" exposure={detailExposure} curves={DEFAULT_CURVES} grade={DEFAULT_GRADE} />
                 )}
-                {/* The sharp detail is the edited photo's: not while Before is held (it would cover it). */}
-                {underDetail.current && placed && !comparing && (
+                {/* The sharp detail is the edited photo's: not while Before is held (it would cover it).
+                    The previous patch stays under the new one only where they cover the same part (the
+                    new one fading in over it): from another zoom or place it stuck out round the new
+                    one, an odd square, at an older exposure after a change (24 Oct). */}
+                {underDetail.current && placed && !comparing && detailShown && sameRect(underDetail.current.rect, detailShown.rect) && (
                   <img
                     className="viewer__detail"
                     src={underDetail.current.src}

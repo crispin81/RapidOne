@@ -110,6 +110,24 @@ pub struct Local {
     pub definition: [f32; 3],
 }
 
+/// Radial fade (gradient kit, 17 Oct): from 1 - k0 f^k1 to 1 + k2 f^k3 of the radius (f: Feather / 100).
+pub(crate) const RADIAL_FADE: [f32; 4] = [1.2, 0.8, 0.32, 0.35];
+/// The local sliders' strengths, set to Lightroom's (gradient kit, 17 Oct,
+/// tools/ml/gradient_sliders_fit.py); shared with the GPU engine (`gpu::params`).
+/// Temperature (red, blue) and Tint (red and blue, green) in stops a unit.
+pub(crate) const LOCAL_WB: [f32; 4] = [0.47, 0.61, 0.082, 0.246];
+/// Contrast: its centre, strength + and -, and how fast it eases off away from the centre.
+pub(crate) const LOCAL_CONTRAST: [f32; 4] = [0.46, 0.31, 0.23, 1.6];
+/// Highlights and Shadows: where the band starts, its width, strength + and -.
+pub(crate) const LOCAL_HIGHLIGHTS: [f32; 4] = [0.45, 0.5, 0.5, 0.12];
+pub(crate) const LOCAL_SHADOWS: [f32; 4] = [0.05, 0.5, 0.1, 0.42];
+/// Whites: strength +, where it eases off near white and over what, strength -.
+pub(crate) const LOCAL_WHITES: [f32; 4] = [0.27, 1.05, 0.3, 0.24];
+/// Blacks: strength + and -.
+pub(crate) const LOCAL_BLACKS: [f32; 2] = [0.31, 0.34];
+/// Saturation: strength + and -.
+pub(crate) const LOCAL_SATURATION: [f32; 2] = [0.58, 0.95];
+
 fn smooth(t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
@@ -143,7 +161,8 @@ impl Gradient {
                 let w = if f <= 1e-3 {
                     if d <= 1.0 { 1.0 } else { 0.0 }
                 } else {
-                    let (a, b) = (1.0 - 1.2 * f.powf(0.8), 1.0 + 0.32 * f.powf(0.35));
+                    let [k0, k1, k2, k3] = RADIAL_FADE;
+                    let (a, b) = (1.0 - k0 * f.powf(k1), 1.0 + k2 * f.powf(k3));
                     1.0 - smooth((d - a) / (b - a))
                 };
                 if self.invert { 1.0 - w } else { w }
@@ -335,7 +354,7 @@ pub fn refine_subject(mask: &crate::mask::Mask, image: &crate::pipeline::SceneIm
 
 /// One shape of a mask, ready to sample: a gradient's formula, or a mask grid (a subject
 /// mask softened by its Feather, or brush strokes painted).
-enum Comp {
+pub(crate) enum Comp {
     Formula(Gradient),
     Map(Grid),
     Nothing,
@@ -370,10 +389,10 @@ impl Comp {
 /// two) or subtracted (what's there times one minus the part), each part with its own
 /// Invert; the mask's Invert last, on the whole.
 pub struct MaskShape {
-    base: Comp,
-    parts: Vec<(bool, bool, Comp)>,
-    invert: bool,
-    aspect: f32,
+    pub(crate) base: Comp,
+    pub(crate) parts: Vec<(bool, bool, Comp)>,
+    pub(crate) invert: bool,
+    pub(crate) aspect: f32,
 }
 
 impl MaskShape {
@@ -407,8 +426,8 @@ pub fn needs_subject(g: &Gradient) -> bool {
 
 /// The photo's gradients, ready to render.
 pub struct Prepared<'a> {
-    list: &'a [Gradient],
-    masks: Vec<MaskShape>,
+    pub(crate) list: &'a [Gradient],
+    pub(crate) masks: Vec<MaskShape>,
 }
 
 impl<'a> Prepared<'a> {
@@ -509,7 +528,8 @@ impl Local {
         // green). Strengths set to Lightroom's local sliders (gradient kit,
         // 17 Oct, tools/ml/gradient_sliders_fit.py): Temperature x1.35 and
         // Tint x0.82 of the first guesses.
-        let gain = [self.ev + 0.47 * self.temp + 0.082 * self.tint, self.ev - 0.246 * self.tint, self.ev - 0.61 * self.temp + 0.082 * self.tint];
+        let [tr, tb, ti, tg] = LOCAL_WB;
+        let gain = [self.ev + tr * self.temp + ti * self.tint, self.ev - tg * self.tint, self.ev - tb * self.temp + ti * self.tint];
         std::array::from_fn(|k| p[k] * gain[k].exp2())
     }
 
@@ -529,18 +549,21 @@ impl Local {
             // its + Highlights and - Shadows push harder than the other way.
             if self.contrast != 0.0 {
                 // An S round mid-grey, gentler at the ends so nothing jumps to clipping.
-                let d = l - 0.46;
-                let k = if self.contrast > 0.0 { 0.31 } else { 0.23 };
-                l += self.contrast * k * d * (1.0 - (d.abs() * 1.6).min(1.0));
+                let [centre, plus, minus, ease] = LOCAL_CONTRAST;
+                let d = l - centre;
+                let k = if self.contrast > 0.0 { plus } else { minus };
+                l += self.contrast * k * d * (1.0 - (d.abs() * ease).min(1.0));
             }
             if self.highlights != 0.0 {
-                let w = smooth((l - 0.45) / 0.5);
-                let k = if self.highlights > 0.0 { 0.5 } else { 0.12 };
+                let [from, width, plus, minus] = LOCAL_HIGHLIGHTS;
+                let w = smooth((l - from) / width);
+                let k = if self.highlights > 0.0 { plus } else { minus };
                 l += self.highlights * k * w * if self.highlights > 0.0 { (1.0 - l).max(0.0) } else { l };
             }
             if self.shadows != 0.0 {
-                let w = 1.0 - smooth((l - 0.05) / 0.5);
-                let k = if self.shadows > 0.0 { 0.1 } else { 0.42 };
+                let [from, width, plus, minus] = LOCAL_SHADOWS;
+                let w = 1.0 - smooth((l - from) / width);
+                let k = if self.shadows > 0.0 { plus } else { minus };
                 l += self.shadows * k * w * if self.shadows > 0.0 { (1.0 - l).max(0.0) } else { l };
             }
             // Whites and Blacks: the shapes the gradient kit measured (17 Oct,
@@ -549,10 +572,11 @@ impl Local {
             // white going up; Blacks in proportion to its darkness (+0.13 at
             // 0.15, nothing at white).
             if self.whites != 0.0 {
-                l += if self.whites > 0.0 { self.whites * 0.27 * l * smooth((1.05 - l) / 0.3) } else { self.whites * 0.24 * l };
+                let [plus, top, ease, minus] = LOCAL_WHITES;
+                l += if self.whites > 0.0 { self.whites * plus * l * smooth((top - l) / ease) } else { self.whites * minus * l };
             }
             if self.blacks != 0.0 {
-                l += self.blacks * if self.blacks > 0.0 { 0.31 } else { 0.34 } * (1.0 - l).max(0.0);
+                l += self.blacks * if self.blacks > 0.0 { LOCAL_BLACKS[0] } else { LOCAL_BLACKS[1] } * (1.0 - l).max(0.0);
             }
             let k = l.max(0.0).powf(2.4) / y;
             c = c.map(|v| v * k);
@@ -560,7 +584,7 @@ impl Local {
         if self.saturation != 0.0 {
             let y = 0.2627 * c[0] + 0.678 * c[1] + 0.0593 * c[2];
             // Lightroom's + Saturation is gentler than its - (kit, 17 Oct).
-            let s = (1.0 + self.saturation * if self.saturation > 0.0 { 0.58 } else { 0.95 }).max(0.0);
+            let s = (1.0 + self.saturation * if self.saturation > 0.0 { LOCAL_SATURATION[0] } else { LOCAL_SATURATION[1] }).max(0.0);
             c = c.map(|v| y + (v - y) * s);
         }
         c

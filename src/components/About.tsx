@@ -64,6 +64,8 @@ const PARTS: Part[] = [
           { name: "image, tiff", licence: "MIT / Apache-2.0", does: "JPEG, PNG and TIFF in and out", url: "https://github.com/image-rs/image" },
           { name: "kamadak-exif", licence: "BSD-2-Clause", does: "Camera details and orientation", url: "https://github.com/kamadak/exif-rs" },
           { name: "rayon", licence: "MIT / Apache-2.0", does: "Uses every CPU core for the engine", url: "https://github.com/rayon-rs/rayon" },
+          { name: "wgpu", licence: "MIT / Apache-2.0", does: "Runs the engine on the graphics card (Metal, Vulkan, DirectX 12)", url: "https://wgpu.rs" },
+          { name: "jpeg-encoder", licence: "MIT / Apache-2.0, IJG", does: "Sends the picture to the screen as JPEG, on every core; based in part on the work of the Independent JPEG Group", url: "https://github.com/vstroebel/jpeg-encoder" },
           { name: "roxmltree", licence: "MIT / Apache-2.0", does: "Reads the lens database", url: "https://github.com/RazrFalcon/roxmltree" },
           { name: "flate2", licence: "MIT / Apache-2.0", does: "Reads the compressed tables in camera profiles", url: "https://github.com/rust-lang/flate2-rs" },
           { name: "serde", licence: "MIT / Apache-2.0", does: "Saves edits and settings", url: "https://serde.rs" },
