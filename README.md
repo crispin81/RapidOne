@@ -174,6 +174,7 @@ Photos never leave your computer.
 - Astro mode, with stacking and stretching
 - Timelapse rendering with keyframes
 - Tethered shooting: shoot straight into RapidOne from your camera
+- RapidOne for Android tablets, with live stream editing
 - RapidOne on Meta VR glasses
 
 ## AI models
