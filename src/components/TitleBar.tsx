@@ -14,6 +14,8 @@ const appWindow = getCurrentWindow();
 interface Props {
   /** A folder being read (Edit's scan): its loading bar, right of About. */
   progress?: { done: number; total: number } | null;
+  /** Stops that read (the x on its loading bar). */
+  onCancelRead?: () => void;
   /** Retouch's status line (engine, progress, errors) goes here, in Retouch only: in the right half,
    *  between the title and the window buttons, clear of the top bar's tools. */
   statusSlot?: (el: HTMLDivElement | null) => void;
@@ -36,7 +38,7 @@ interface Loading {
  * Edit's folder read from `progress`, the modules' from their `rapidone:loading` events), the title,
  * and the window buttons.
  */
-export default function TitleBar({ progress, statusSlot, handBack, mode }: Props) {
+export default function TitleBar({ progress, onCancelRead, statusSlot, handBack, mode }: Props) {
   const [about, setAbout] = useState(false);
   // The app's version (tauri.conf.json), as "V1.0" (the last digit only when it isn't 0).
   const [version, setVersion] = useState("");
@@ -61,6 +63,7 @@ export default function TitleBar({ progress, statusSlot, handBack, mode }: Props
         : mode === "retouch"
           ? (modules.retouch ?? null)
           : null;
+  const readingFolder = !handBack && Boolean(progress && progress.done < progress.total);
   const fraction =
     loading?.fraction ?? (loading?.total ? (loading.done ?? 0) / loading.total : null);
   return (
@@ -93,6 +96,11 @@ export default function TitleBar({ progress, statusSlot, handBack, mode }: Props
             ) : fraction != null ? (
               <span className="titlebar__scan-count">{Math.round(fraction * 100)}%</span>
             ) : null}
+            {readingFolder && onCancelRead && (
+              <button type="button" className="titlebar__scan-cancel" onClick={onCancelRead} title="Stop reading this folder" aria-label="Stop reading this folder">
+                <X size={12} />
+              </button>
+            )}
           </span>
         )}
       </div>

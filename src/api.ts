@@ -10,8 +10,8 @@ import type { AutoTransform } from "./transform";
 import type { FullPreview, PhotoInfo, ScanProgress } from "./types";
 
 /** Resolves with the paths that failed to decode once the whole scan is done. */
-export function scanFolder(folder: string): Promise<string[]> {
-  return invoke("scan_folder", { folder });
+export function scanFolder(folder: string, scan: number): Promise<string[]> {
+  return invoke("scan_folder", { folder, scan });
 }
 
 export function getFullPreview(path: string): Promise<FullPreview> {
@@ -22,12 +22,16 @@ export function setRatingAndPick(path: string, rating: number, pick: boolean): P
   return invoke("set_rating_and_pick", { path, rating, pick });
 }
 
+export function cancelScan(): Promise<void> {
+  return invoke("cancel_scan");
+}
+
 export function setRating(path: string, rating: number): Promise<void> {
   return invoke("set_rating", { path, rating });
 }
 
-export function onPhotoReady(handler: (photo: PhotoInfo) => void): Promise<UnlistenFn> {
-  return listen<PhotoInfo>("photo-ready", (event) => handler(event.payload));
+export function onPhotoReady(handler: (photo: PhotoInfo & { scan: number }) => void): Promise<UnlistenFn> {
+  return listen<PhotoInfo & { scan: number }>("photo-ready", (event) => handler(event.payload));
 }
 
 export function onScanProgress(handler: (progress: ScanProgress) => void): Promise<UnlistenFn> {

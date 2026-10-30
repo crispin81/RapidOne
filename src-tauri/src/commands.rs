@@ -1,9 +1,9 @@
 use crate::library;
 use crate::preview;
-use crate::types::{FullPreview, PhotoInfo, ScanProgress};
+use crate::types::{FullPreview, PhotoInfo, ScanPhoto, ScanProgress};
 use crate::xmp::{self, RatingFlags};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::Emitter;
 
@@ -13,14 +13,25 @@ const FILMSTRIP_THUMB_MAX_DIM: u32 = 480;
 /// Long edge of the viewer image until real RAW development lands.
 const FULL_PREVIEW_MAX_DIM: u32 = 2400;
 
+/// The folder read that's wanted now: an older one still going stops at its next photo.
+static CURRENT_SCAN: AtomicU64 = AtomicU64::new(0);
+
+/// Stops the folder read going on (the x on its loading bar). The photos read so far stay.
+#[tauri::command]
+pub fn cancel_scan() {
+    CURRENT_SCAN.store(0, Ordering::Relaxed);
+}
+
 /// Scans the working folder, emitting `photo-ready` per photo as thumbnails
 /// finish (in no particular order - the frontend sorts) and returning the
-/// paths that failed to decode.
+/// paths that failed to decode. `scan` is the frontend's number for this read,
+/// on its events so it can drop any from a read it has moved on from.
 #[tauri::command]
-pub async fn scan_folder(app: tauri::AppHandle, folder: String) -> Result<Vec<String>, String> {
+pub async fn scan_folder(app: tauri::AppHandle, folder: String, scan: u64) -> Result<Vec<String>, String> {
+    CURRENT_SCAN.store(scan, Ordering::Relaxed);
     let found = library::find_photos(Path::new(&folder))?;
     let total = found.len();
-    let _ = app.emit("scan-progress", ScanProgress { done: 0, total });
+    let _ = app.emit("scan-progress", ScanProgress { scan, done: 0, total });
     // In the phone app's list of folders (RapidCull for Android).
     tauri_plugin_rapidculling::phone_app::note_recent(Path::new(&folder));
 
@@ -38,9 +49,12 @@ pub async fn scan_folder(app: tauri::AppHandle, folder: String) -> Result<Vec<St
             scope.spawn(move || {
                 tauri_plugin_rapidculling::priority::background();
                 for photo in chunk {
+                    if CURRENT_SCAN.load(Ordering::Relaxed) != scan {
+                        break;
+                    }
                     match process_photo(&photo.raw_path, photo.jpeg_path.as_deref()) {
                         Ok(info) => {
-                            let _ = app.emit("photo-ready", &info);
+                            let _ = app.emit("photo-ready", ScanPhoto { scan, info });
                         }
                         Err(_) => failed_paths
                             .lock()
@@ -48,7 +62,7 @@ pub async fn scan_folder(app: tauri::AppHandle, folder: String) -> Result<Vec<St
                             .push(photo.raw_path.to_string_lossy().to_string()),
                     }
                     let done = progress.fetch_add(1, Ordering::Relaxed) + 1;
-                    let _ = app.emit("scan-progress", ScanProgress { done, total });
+                    let _ = app.emit("scan-progress", ScanProgress { scan, done, total });
                 }
             });
         }

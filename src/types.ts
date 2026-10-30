@@ -18,6 +18,7 @@ export interface PhotoInfo {
 }
 
 export interface ScanProgress {
+  scan: number;
   total: number;
   done: number;
 }

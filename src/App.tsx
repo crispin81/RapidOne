@@ -76,6 +76,7 @@ import {
   type AutoStyle,
   type Trashed,
   scanFolder,
+  cancelScan,
   setRatingAndPick,
   engineSettingsFrom,
   DEFAULT_PROFILE,
@@ -949,10 +950,15 @@ export default function App() {
     };
   }, [currentPath]);
 
-  // Histogram of the current preview, for behind the curve.
+  // Histogram of the current preview, for behind the curve. A new photo clears it; a new render of
+  // the same photo keeps the old one up until its own is counted (cleared on every render, it blinked
+  // out for the whole of a slider drag), and the quick frames during a drag aren't counted at all.
+  const histogramPath = useRef<string | null>(null);
   useEffect(() => {
-    setHistogram(null);
-    if (!preview) return;
+    const path = preview?.path ?? null;
+    if (path !== histogramPath.current) setHistogram(null);
+    histogramPath.current = path;
+    if (!preview || preview.interactive) return;
     let cancelled = false;
     computeHistogram(preview.imageBase64)
       .then((h) => !cancelled && setHistogram(h))
@@ -964,11 +970,14 @@ export default function App() {
     };
   }, [preview]);
 
+  // The folder read wanted now (on its events). From the clock, so a reload can't reuse a number.
+  const scanRef = useRef(Date.now());
+
   // Scan events: thumbnails arrive one by one (hundreds a second once they're cached), so they're
   // gathered and put on screen in batches about ten times a second, not one update (a copy of the
   // whole list) each.
   useEffect(() => {
-    let arrived: PhotoInfo[] = [];
+    let arrived: (PhotoInfo & { scan: number })[] = [];
     let progress: ScanProgress | null = null;
     // The highest count of this scan so far: the reading threads each take a number, then send it,
     // so a lower one can arrive after a higher one (the count jumped back and forth, 25 Oct).
@@ -976,7 +985,8 @@ export default function App() {
     let timer: number | null = null;
     const flush = () => {
       timer = null;
-      const batch = arrived;
+      // Only this read's: another folder may have been opened since these arrived.
+      const batch = arrived.filter((p) => p.scan === scanRef.current);
       arrived = [];
       if (batch.length) {
         setPhotosByPath((prev) => {
@@ -994,7 +1004,7 @@ export default function App() {
         if (unfinished.length) void loadEditsRef.current(unfinished).then(() => prepareFullRef.current(unfinished));
       }
       if (progress) {
-        setProgress(progress);
+        if (progress.scan === scanRef.current) setProgress(progress);
         progress = null;
       }
     };
@@ -1003,10 +1013,12 @@ export default function App() {
     };
     const unlisteners = [
       onPhotoReady((photo) => {
+        if (photo.scan !== scanRef.current) return;
         arrived.push(photo);
         soon();
       }),
       onScanProgress((p) => {
+        if (p.scan !== scanRef.current) return;
         // A new scan starts at 0 (or has another total); within one, the count only goes up.
         if (highest && p.done !== 0 && p.total === highest.total && p.done < highest.done) return;
         highest = p;
@@ -1648,9 +1660,11 @@ export default function App() {
   // The working folder, shared by Cull, Edit and Retouch: opened here, from
   // the Home prompt, or from inside Cull (which tells us through onFolderChange).
   const loadFolder = useCallback(async (picked: string, exact = false) => {
+    const scan = ++scanRef.current;
     // A shoot already organised by Cull opens at its "rated" folder in Edit
     // (in Cull, or chosen on the All / Rated / Unrated switch, the folder is kept).
     const chosen = exact || modeRef.current === "cull" ? picked : ((await ratedSubfolder(picked).catch(() => null)) ?? picked);
+    if (scan !== scanRef.current) return;
     setHome(false);
     setFolder(chosen);
     try {
@@ -1685,14 +1699,22 @@ export default function App() {
     sidecarWritten.current.clear();
     sidecarOrigin.current.clear();
     try {
-      const failed = await scanFolder(chosen);
+      const failed = await scanFolder(chosen, scan);
+      if (scan !== scanRef.current) return;
       if (failed.length > 0)
         setError(
           `${failed.length} file${failed.length === 1 ? "" : "s"} couldn't be read: ${failed.slice(0, 3).map((f) => f.split(/[\\/]/).pop()).join(", ")}${failed.length > 3 ? "…" : ""}.`,
         );
     } catch (e) {
-      setError(`Couldn't open folder: ${e}`);
+      if (scan === scanRef.current) setError(`Couldn't open folder: ${e}`);
     }
+  }, []);
+
+  // The x on the loading bar: the read stops, the photos read so far stay.
+  const cancelFolderRead = useCallback(() => {
+    scanRef.current++;
+    setProgress(null);
+    void cancelScan();
   }, []);
 
   const openFolder = useCallback(async () => {
@@ -3482,6 +3504,7 @@ export default function App() {
     <div className="app-shell">
       <TitleBar
         progress={progress}
+        onCancelRead={cancelFolderRead}
         mode={atHome ? undefined : mode}
         statusSlot={mode === "retouch" && !atHome ? setRetouchStatus : undefined}
         // A retouched photo coming back into Edit: in the title bar's loading bar, as everything else.

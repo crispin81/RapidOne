@@ -21,9 +21,18 @@ pub struct PhotoInfo {
     pub denoised: bool,
 }
 
+/// A photo from a folder read, with that read's number (`scan_folder`).
+#[derive(Serialize, Clone)]
+pub struct ScanPhoto {
+    pub scan: u64,
+    #[serde(flatten)]
+    pub info: PhotoInfo,
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanProgress {
+    pub scan: u64,
     pub total: usize,
     pub done: usize,
 }

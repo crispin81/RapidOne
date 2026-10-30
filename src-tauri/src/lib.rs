@@ -96,6 +96,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::scan_folder,
+            commands::cancel_scan,
             commands::get_full_preview,
             commands::add_photo,
             commands::trash_photos,

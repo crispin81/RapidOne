@@ -3591,6 +3591,22 @@ button:not(:disabled):hover {
   font-variant-numeric: tabular-nums;
 }
 
+.titlebar__scan-cancel {
+  flex: none;
+  /* The bar around it takes no clicks. */
+  pointer-events: auto;
+  display: flex;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #8a8b96;
+  cursor: pointer;
+}
+
+.titlebar__scan-cancel:hover {
+  color: rgb(255, 122, 26);
+}
+
 .titlebar__about:hover {
   border-color: rgb(255, 122, 26);
   color: rgb(255, 122, 26);
