@@ -6,6 +6,17 @@
       "windows-lib/msvcp140_1.dll": "msvcp140_1.dll",
       "windows-lib/vcruntime140.dll": "vcruntime140.dll",
       "windows-lib/vcruntime140_1.dll": "vcruntime140_1.dll"
+    },
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "headerImage": "icons/installer/nsis-header.bmp",
+        "sidebarImage": "icons/installer/nsis-sidebar.bmp"
+      },
+      "wix": {
+        "bannerPath": "icons/installer/wix-banner.bmp",
+        "dialogImagePath": "icons/installer/wix-dialog.bmp"
+      }
     }
   }
 }

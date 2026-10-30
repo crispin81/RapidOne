@@ -45,8 +45,10 @@ export default function RenderMenu({ retouch = false }: { retouch?: boolean }) {
   // Renders moving between the GPU and the CPU (sent only on a change, so no cost while dragging).
   useEffect(() => {
     const off = listen<RenderStatus>("render-status", (e) => setStatus(e.payload));
+    // Read again now it's listening: a change before then (the GPU's warm-up at start) sent nothing here.
+    void off.then(refresh);
     return () => void off.then((f) => f());
-  }, []);
+  }, [refresh]);
   // Retouch's engine, once it's up (it starts the first time its tab opens).
   const [retouchDevice, setRetouchDevice] = useState<RetouchDevice | null>(
     () => (window as unknown as { rapidretouchDevice?: RetouchDevice }).rapidretouchDevice ?? null,
