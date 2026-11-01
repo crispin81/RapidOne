@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Aperture, Search } from "lucide-react";
 import { lensDbVersion, lensInfo, lensSearch, type LensInfo } from "../api";
 import { checkLensUpdates } from "../lensUpdates";
+import type { Adjustments } from "../adjustments";
+import Defringe from "./Defringe";
 
 interface Props {
   /** The open photo (none: the button is off). */
@@ -17,6 +19,12 @@ interface Props {
   /** A lens chosen for every photo whose EXIF names `exif` (0: back to the one found). */
   onChoose: (exif: string, lensId: number) => void;
   onLoadProfiles: () => void;
+  /** The photo's settings (for Defringe's) and a change to some of them (one undo step per control). */
+  values: Adjustments;
+  onSet: (changes: Record<string, number>) => void;
+  /** The fringe picker is waiting for a click on the photo (the menu stays open meanwhile). */
+  picking: boolean;
+  onPickFringe: () => void;
 }
 
 const Toggle = ({ on }: { on: boolean }) => (
@@ -32,7 +40,7 @@ const Toggle = ({ on }: { on: boolean }) => (
  * typing its name: it goes on every photo with the same lens name. Own profiles load as
  * Lensfun .xml files.
  */
-export default function LensMenu({ path, auto, on, rev, onAuto, onPhoto, onChoose, onLoadProfiles }: Props) {
+export default function LensMenu({ path, auto, on, rev, onAuto, onPhoto, onChoose, onLoadProfiles, values, onSet, picking, onPickFringe }: Props) {
   const [open, setOpen] = useState(false);
   const [info, setInfo] = useState<LensInfo | null>(null);
   const [query, setQuery] = useState("");
@@ -80,9 +88,13 @@ export default function LensMenu({ path, auto, on, rev, onAuto, onPhoto, onChoos
       window.clearTimeout(t);
     };
   }, [query]);
+  const pickingRef = useRef(picking);
+  pickingRef.current = picking;
   useEffect(() => {
     if (!open) return;
     const onDown = (e: PointerEvent) => {
+      // A click on the photo for the fringe picker leaves the menu open, so its result shows.
+      if (pickingRef.current) return;
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
     window.addEventListener("pointerdown", onDown);
@@ -110,16 +122,17 @@ export default function LensMenu({ path, auto, on, rev, onAuto, onPhoto, onChoos
   // Corrected for real: switched on, and a profile for its lens.
   const available = Boolean(info?.chosen || info?.detected);
   const corrected = on && available;
+  const defringed = (values.defringePurple ?? 0) > 0 || (values.defringeGreen ?? 0) > 0;
   const lensNote = info?.chosen ? `chosen for every "${exif}" photo` : info?.detected ? "found from the photo" : exif ? "type its name below to choose it" : "";
 
   return (
     <div className="topbar__menu lensmenu" ref={ref}>
       <button
         type="button"
-        className={corrected ? "is-on" : undefined}
+        className={corrected || defringed ? "is-on" : undefined}
         disabled={!path}
         onClick={() => setOpen((o) => !o)}
-        title="Lens corrections: distortion, colour fringing and vignetting, from each photo's lens"
+        title="Lens corrections: distortion, colour fringing and vignetting, from each photo's lens; and Defringe"
         aria-label="Lens corrections"
       >
         <Aperture size={14} /> <span className="topbar__label">Lens</span>
@@ -187,6 +200,7 @@ export default function LensMenu({ path, auto, on, rev, onAuto, onPhoto, onChoos
               )}
             </>
           )}
+          <Defringe values={values} onSet={onSet} picking={picking} onPick={onPickFringe} />
           <div className="lensmenu__db">
             <span>{db ? `Lensfun profiles, ${new Date(db.date).toLocaleDateString()} (${db.lenses.toLocaleString()} lenses)` : "Lensfun profiles"}</span>
             <button

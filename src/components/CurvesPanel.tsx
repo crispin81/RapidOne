@@ -289,7 +289,7 @@ export default function CurvesPanel({ curves, histogram, shotLabel, onChange, va
           type="button"
           className={`curves__channel${region ? " curves__channel--on" : ""}${regionEdited ? " curves__channel--edited" : ""}`}
           style={{ color: "#3ee6ff" }}
-          title="Region: Lightroom's parametric curve (Highlights, Lights, Darks, Shadows). Drag the three handles along the bottom to move where the regions meet.\nKeys: Shift+C (Curves), then tap P"
+          title="Region: a parametric curve (Highlights, Lights, Darks, Shadows). Drag the three handles along the bottom to move where the regions meet.\nKeys: Shift+C (Curves), then tap P"
           onClick={() => setTab("region")}
         >
           Reg

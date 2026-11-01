@@ -9,13 +9,14 @@
 
 use rayon::prelude::*;
 
-/// RGB (3 bytes a pixel, `w` x `h`) as a JPEG at `quality` (1..100; below 90 the colour is stored
-/// at half size each way, 4:2:0, as `jpeg-encoder` does by default).
+/// RGB (3 bytes a pixel, `w` x `h`) as a JPEG at `quality` (1..100). The colour is always stored at
+/// full size (4:4:4): `jpeg-encoder`'s default below 90 halves it each way (4:2:0), which smeared a
+/// tint round sharp edges, yellow round the text on a white sign (1 Nov).
 pub fn encode(px: &[u8], w: u32, h: u32, quality: u8) -> Result<Vec<u8>, String> {
     if w == 0 || h == 0 || w > 65535 || h > 65535 {
         return Err(format!("can't encode a {w}x{h} JPEG"));
     }
-    let mcu = if quality < 90 { 16 } else { 8 };
+    let mcu = 8;
     let across = w.div_ceil(mcu);
     let mcu_rows = h.div_ceil(mcu);
     // Twice as many strips as cores (they don't all take the same time), each a whole number of MCU
@@ -59,7 +60,9 @@ fn strip(px: &[u8], w: u32, y0: u32, sh: u32, quality: u8) -> Result<Vec<u8>, St
     let row = w as usize * 3;
     let part = &px[y0 as usize * row..(y0 + sh) as usize * row];
     let mut out = Vec::with_capacity(part.len() / 8);
-    jpeg_encoder::Encoder::new(&mut out, quality).encode(part, w as u16, sh as u16, jpeg_encoder::ColorType::Rgb).map_err(|e| e.to_string())?;
+    let mut enc = jpeg_encoder::Encoder::new(&mut out, quality);
+    enc.set_sampling_factor(jpeg_encoder::SamplingFactor::R_4_4_4);
+    enc.encode(part, w as u16, sh as u16, jpeg_encoder::ColorType::Rgb).map_err(|e| e.to_string())?;
     Ok(out)
 }
 

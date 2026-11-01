@@ -27,11 +27,25 @@ fn write(path: &Path, bytes: &[u8]) -> Result<(), String> {
     std::fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 
+/// The engine's built-in look (`Tuning::adobe`'s display curves and the like): raised whenever it
+/// changes, so pictures cached with the old one are rendered again rather than shown (their settings
+/// key, the app's, doesn't change with the engine). 1: the S curve halved; 2: Yellow +10 -> +5 (2026-11-01). 3: Colour noise reduction; 4, 5: its strength and method; 6: it follows edges, and sharpening keeps colour; 7: sharpening refitted, 2026-11-01.
+const ENGINE_LOOK: u32 = 7;
+
 #[derive(serde::Serialize, serde::Deserialize)]
 struct PreviewMeta {
+    /// `ENGINE_LOOK` when it was rendered (0: before the stamp).
+    #[serde(default)]
+    look: u32,
     /// The settings the picture was rendered with (the app's JSON key).
     key: String,
     preview: DevelopedPreview,
+}
+
+/// The cached picture's details, if it was rendered with the engine's current look.
+fn read_meta(photo: &Path) -> Option<PreviewMeta> {
+    let meta: PreviewMeta = serde_json::from_str(&std::fs::read_to_string(file(photo, "preview.json")?).ok()?).ok()?;
+    (meta.look == ENGINE_LOOK).then_some(meta)
 }
 
 /// A cached engine picture and the settings key it was rendered with. The
@@ -46,7 +60,7 @@ pub fn load_preview(photo: &Path) -> Option<(String, DevelopedPreview)> {
         }
         return None;
     }
-    let meta: PreviewMeta = serde_json::from_str(&std::fs::read_to_string(file(photo, "preview.json")?).ok()?).ok()?;
+    let meta = read_meta(photo)?;
     let jpeg = std::fs::read(file(photo, "preview.jpg")?).ok()?;
     let image_base64 = format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(jpeg));
     Some((meta.key, DevelopedPreview { image_base64, ..meta.preview }))
@@ -59,7 +73,7 @@ pub fn preview_key(photo: &Path) -> Option<(String, Option<f32>, Option<f32>)> {
     if !crate::sidecar::path_for(photo).is_some_and(|p| p.is_file()) {
         return None;
     }
-    let meta: PreviewMeta = serde_json::from_str(&std::fs::read_to_string(file(photo, "preview.json")?).ok()?).ok()?;
+    let meta = read_meta(photo)?;
     Some((meta.key, meta.preview.as_shot_temperature, meta.preview.as_shot_tint))
 }
 
@@ -72,12 +86,16 @@ pub fn preview_jpeg(photo: &Path) -> Option<Vec<u8>> {
     if !rapidone && (!crate::sidecar::lightroom_applies(photo) || crate::preset::for_photo(photo).is_none()) {
         return None;
     }
+    read_meta(photo)?;
     std::fs::read(file(photo, "preview.jpg")?).ok()
 }
 
 /// Whether the photo's last engine picture is still its current one: rendered after its edit was
 /// last saved (every edit change rewrites the .rpd). For the "rendered" sparkle after a reopen.
 pub fn preview_current(photo: &Path) -> bool {
+    if read_meta(photo).is_none() {
+        return false;
+    }
     let modified = |p: Option<PathBuf>| p.and_then(|p| std::fs::metadata(p).ok()).and_then(|m| m.modified().ok());
     match (modified(file(photo, "preview.json")), modified(crate::sidecar::path_for(photo))) {
         (Some(picture), Some(edit)) => picture >= edit,
@@ -99,7 +117,7 @@ pub fn save_preview(photo: &Path, key: &str, preview: &DevelopedPreview) -> Resu
     let data = preview.image_base64.split_once("base64,").map_or(preview.image_base64.as_str(), |(_, d)| d);
     let jpeg = base64::engine::general_purpose::STANDARD.decode(data).map_err(|e| e.to_string())?;
     write(&file(photo, "preview.jpg").ok_or("no cache folder")?, &jpeg)?;
-    let meta = PreviewMeta { key: key.to_string(), preview: DevelopedPreview { image_base64: String::new(), ..preview.clone() } };
+    let meta = PreviewMeta { look: ENGINE_LOOK, key: key.to_string(), preview: DevelopedPreview { image_base64: String::new(), ..preview.clone() } };
     write(&file(photo, "preview.json").ok_or("no cache folder")?, serde_json::to_string(&meta).map_err(|e| e.to_string())?.as_bytes())
 }
 

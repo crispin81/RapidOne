@@ -69,7 +69,7 @@ export default function PresetMenu({ presets, disabled, onApply, onSave, onDelet
           </div>
 
           {sorted.length === 0 ? (
-            <p className="presets__empty">No presets yet. Save the current settings below, or import Lightroom presets.</p>
+            <p className="presets__empty">No presets yet. Save the current settings below, or import .xmp presets.</p>
           ) : (
             <ul className="presets__list">
               {sorted.map((p) => (
@@ -78,7 +78,7 @@ export default function PresetMenu({ presets, disabled, onApply, onSave, onDelet
                     type="button"
                     role="menuitem"
                     className="presets__apply"
-                    title={p.origin === "lightroom" ? `${p.name} (imported from Lightroom)` : p.name}
+                    title={p.origin === "lightroom" ? `${p.name} (imported from .xmp)` : p.name}
                     onClick={() => {
                       onApply(p, scope);
                       setOpen(false);
@@ -133,7 +133,7 @@ export default function PresetMenu({ presets, disabled, onApply, onSave, onDelet
               setOpen(false);
               onImport();
             }}
-            title="Choose Lightroom presets (.xmp, each converted into a RapidOne preset) or RapidOne preset backups (.rpp)"
+            title="Choose .xmp presets (each converted into a RapidOne preset) or RapidOne preset backups (.rpp)"
           >
             <Download size={13} /> Import presets…
           </button>

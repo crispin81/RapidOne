@@ -146,6 +146,15 @@ fn dt_gauss_v(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups
 
 // sharpen_rl's end: the change (u, fin0, against the brightness, fin2) held within the 3x3 range
 // (halo limit f0), gain f1, on the linear colour (fout0), back to sRGB and stored (uout).
+fn root(v: f32) -> f32 {
+    let x = v + 0.002;
+    return sign(x) * pow(abs(x), 1.0 / 3.0);
+}
+
+fn unroot(r: f32) -> f32 {
+    return max(r * r * r - 0.002, 0.0);
+}
+
 @compute @workgroup_size(64)
 fn dt_final(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) nwg: vec3u) {
     let i = index(gid, nwg);
@@ -166,9 +175,9 @@ fn dt_final(@builtin(global_invocation_id) gid: vec3u, @builtin(num_workgroups) 
     let limit = u.f0 * (hi - lo);
     let yv = fin2[i];
     let d = clamp(fin0[i] - yv, -limit, limit);
-    var k = 1.0;
-    if yv > 1e-6 { k = max((yv + u.f1 * d) / yv, 0.0); }
-    let l = vec3f(fout0[i * 3u], fout0[i * 3u + 1u], fout0[i * 3u + 2u]) * k;
+    // detail::sharpen_rl: the brightness change as one shift in cube roots, so colour differences stay.
+    let shift = root(max(yv + u.f1 * d, 0.0)) - root(yv);
+    let l = vec3f(unroot(root(fout0[i * 3u]) + shift), unroot(root(fout0[i * 3u + 1u]) + shift), unroot(root(fout0[i * 3u + 2u]) + shift));
     store(i, vec3f(lin_to_srgb(l.x), lin_to_srgb(l.y), lin_to_srgb(l.z)) * full_scale());
 }
 

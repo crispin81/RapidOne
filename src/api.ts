@@ -95,6 +95,8 @@ export const ENGINE_SLIDERS = [
   // reduction (denoise.rs), a blend towards the cleaned photo.
   "sharpen",
   "noise",
+  // Colour noise reduction (colournoise.rs): 25 on a RAW unless set otherwise, as Lightroom.
+  "colourNoise",
   "grain",
   // The legacy (Lightroom) vignette's shape (Lightroom's names; its amount is "vignette").
   "vignetteMidpoint",
@@ -163,8 +165,8 @@ export function userProfileName(id: ProfileId): string | null {
 
 /** RapidOne's built-in profiles (and Adobe's two ids, for labels; those come from the user's own profiles). */
 export const PROFILES: { id: ProfileId; label: string; hint: string; needsAdobe?: boolean }[] = [
-  { id: "shinobiColour", label: "Shinobi Colour", hint: "RapidOne's default: a touch more contrast and colour (close to Adobe Color)" },
-  { id: "shinobiStandard", label: "Shinobi Standard", hint: "Flatter and more neutral (close to Adobe Standard)" },
+  { id: "shinobiColour", label: "Shinobi Colour", hint: "RapidOne's default: a touch more contrast and colour" },
+  { id: "shinobiStandard", label: "Shinobi Standard", hint: "Flatter and more neutral" },
   {
     id: "adobeColor",
     label: "Adobe Color",
@@ -286,11 +288,31 @@ export function engineSettingsFrom(
   const lensOn = values.lensCorrect ?? (lensPrefs.auto ? 100 : 0);
   (settings as Record<string, unknown>).lensCorrect = lensOn;
   if (lensOn > 0) (settings as Record<string, unknown>).lensRev = lensPrefs.rev;
+  // Defringe (Lens menu): Lightroom's Amount and hue range per colour.
+  for (const id of DEFRINGE_IDS) (settings as Record<string, unknown>)[id] = values[id] ?? DEFRINGE_NEUTRALS[id];
   if (withWhiteBalance) {
     settings.temperature = values.temperature;
     settings.tint = values.tint;
   }
   return settings;
+}
+
+/** Defringe's settings, in the engine's names (camelCase of `RenderSettings`), and Lightroom's defaults. */
+export const DEFRINGE_IDS = ["defringePurple", "defringePurpleHueLo", "defringePurpleHueHi", "defringeGreen", "defringeGreenHueLo", "defringeGreenHueHi"] as const;
+const DEFRINGE_NEUTRALS: Record<string, number> = { defringePurple: 0, defringePurpleHueLo: 30, defringePurpleHueHi: 70, defringeGreen: 0, defringeGreenHueLo: 40, defringeGreenHueHi: 60 };
+
+/** What a picker read where the photo was clicked (`pick.rs`). */
+export interface Picked {
+  /** Kelvin and Tint that make the clicked colour neutral (null: it can't be, e.g. black). */
+  temperature: number | null;
+  tint: number | null;
+  /** The fringe's colour ("purple" / "green") and the hue range round it (0..100); null if too grey. */
+  fringe: ["purple" | "green", number, number] | null;
+}
+
+/** Reads the photo where it was clicked (`x`, `y`: fractions of the photo as shown), with its current settings. */
+export function pickColour(path: string, settings: RenderSettings, x: number, y: number): Promise<Picked> {
+  return invoke("pick_colour", { path, settings, x, y });
 }
 
 /**

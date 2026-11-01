@@ -122,6 +122,8 @@ pub struct ToolSettings {
     /// 0..100 and film grain 0..100.
     pub sharpen: f32,
     pub noise: f32,
+    /// Colour noise reduction 0..100 (`colournoise.rs`); the app sets 25 for a RAW.
+    pub colour_noise: f32,
     pub grain: f32,
 }
 
@@ -161,6 +163,7 @@ impl Default for ToolSettings {
             dehaze: 0.0,
             sharpen: 0.0,
             noise: 0.0,
+            colour_noise: 0.0,
             grain: 0.0,
         }
     }

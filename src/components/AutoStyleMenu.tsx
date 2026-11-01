@@ -75,7 +75,7 @@ export default function AutoStyleMenu({
   };
 
   const addFolders = async () => {
-    const more = await pick("Folders of your edited RAWs (Lightroom / Aftershoot .xmp edits or RapidOne edits)");
+    const more = await pick("Folders of your edited RAWs (.xmp edits or RapidOne edits)");
     setFolders((f) => [...f, ...more.filter((m) => !f.includes(m))]);
   };
 
@@ -180,7 +180,7 @@ export default function AutoStyleMenu({
                   </button>
                 </div>
               ))}
-              <button type="button" onClick={() => void addFolders()} title="Folders of RAWs you edited in Lightroom, Aftershoot or RapidOne (only edited RAWs are used, each with the edit Edit opens it with)">
+              <button type="button" onClick={() => void addFolders()} title="Folders of RAWs you edited, with .xmp or RapidOne edits (only edited RAWs are used, each with the edit Edit opens it with)">
                 <FolderPlus size={13} /> {folders.length ? "Add more folders" : "Choose folders of your edits"}
               </button>
               <p className="autostyle__hint">One shoot per folder is fine; more shoots make it better (10-20 is ideal). Masks are ignored.</p>

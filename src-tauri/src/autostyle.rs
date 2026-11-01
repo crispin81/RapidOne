@@ -607,12 +607,12 @@ pub fn train(name: &str, folders: &[String], base: Option<Style>, progress: Prog
         })
         .collect();
     if base.is_some() && fresh.is_empty() {
-        return Err("No new edited photos in that folder (only RAWs with an edit count: a Lightroom / Aftershoot .xmp or RapidOne's own; ones already learned are skipped).".into());
+        return Err("No new edited photos in that folder (only RAWs with an edit count: an .xmp or RapidOne's own; ones already learned are skipped).".into());
     }
     samples.extend(fresh);
     if samples.len() < MIN_PHOTOS {
         return Err(format!(
-            "Found {} edited photo{}; a style needs at least {MIN_PHOTOS} (RAWs with an edit: a Lightroom / Aftershoot .xmp or RapidOne's own).",
+            "Found {} edited photo{}; a style needs at least {MIN_PHOTOS} (RAWs with an edit: an .xmp or RapidOne's own).",
             samples.len(),
             if samples.len() == 1 { "" } else { "s" }
         ));

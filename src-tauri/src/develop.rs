@@ -361,6 +361,8 @@ pub struct Scene {
     /// The scene with its noise taken out (AI noise reduction, `denoise`),
     /// made the first time the Noise slider is up, then kept with the scene.
     pub denoised: std::sync::OnceLock<Option<std::sync::Arc<crate::pipeline::SceneImage>>>,
+    /// The scene after the Colour slider, at the amount it was last made for (`colournoise::for_scene`).
+    pub colour_cleaned: std::sync::Mutex<Option<(f32, std::sync::Arc<crate::pipeline::SceneImage>)>>,
 }
 
 impl Scene {
@@ -549,6 +551,7 @@ fn develop_scene_with(path: &Path, max_dim: usize, always_full: bool) -> Result<
         subject_mask: std::sync::OnceLock::new(),
         subject_refined: std::sync::OnceLock::new(),
         denoised: std::sync::OnceLock::new(),
+        colour_cleaned: Default::default(),
     })
 }
 

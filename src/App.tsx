@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import "./App.css";
 import "./moduleTweaks.css";
-import { ALL_SLIDERS, DEFAULTS, formatValue, nudge, panelForKey, SLIDER_GROUPS, type Adjustments, type SliderDef } from "./adjustments";
+import { ALL_SLIDERS, defaultsFor, formatValue, nudge, panelForKey, SLIDER_GROUPS, type Adjustments, type SliderDef } from "./adjustments";
 import { DEFAULT_PICKS, MIXER_HOLD, holdTarget, tapPick, type PanelPicks } from "./panelKeys";
 import {
   adobeColorAvailable,
@@ -83,6 +83,7 @@ import {
   type LightroomSettings,
   type ProfileId,
   type RenderSettings,
+  pickColour,
 } from "./api";
 import { applyLightroom, describeApplied, parsePreset, presetFromLightroom, presetFromState, presetText, type RapidPreset } from "./preset";
 import PresetMenu, { type PresetScope } from "./components/PresetMenu";
@@ -92,6 +93,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import AutoStyleMenu, { type AutoStyleScope } from "./components/AutoStyleMenu";
 import DenoiseMenu from "./components/DenoiseMenu";
 import LensMenu from "./components/LensMenu";
+import PickOverlay, { type PickerKind } from "./components/PickOverlay";
 import { checkLensUpdates } from "./lensUpdates";
 import { NO_STRIP_FILTER, passesStripFilter, type StripFilter } from "./components/Filmstrip";
 import CopyPasteMenu from "./components/CopyPasteMenu";
@@ -534,7 +536,7 @@ export default function App() {
   // A photo's neutral values: the global defaults, with Temperature and Tint
   // starting at its own as-shot white balance once the engine has read it.
   const neutrals: Adjustments = useMemo(
-    () => ({ ...DEFAULTS, ...(currentPath ? asShot[currentPath] : undefined) }),
+    () => ({ ...defaultsFor(currentPath), ...(currentPath ? asShot[currentPath] : undefined) }),
     [currentPath, asShot],
   );
   const values: Adjustments = useMemo(
@@ -661,7 +663,7 @@ export default function App() {
     (path: string, shot: { temperature: number; tint: number } | undefined): RenderSettings => {
       const s = snapshotOf(path);
       return engineSettingsFrom(
-        { ...DEFAULTS, ...shot, ...s.edits } as Adjustments,
+        { ...defaultsFor(path), ...shot, ...s.edits } as Adjustments,
         Boolean(shot),
         s.profile ?? DEFAULT_PROFILE,
         s.mixer ?? DEFAULT_MIXER,
@@ -712,7 +714,7 @@ export default function App() {
     setBeforePreview(null);
     const shot = asShotRef.current[path];
     const plain = engineSettingsFrom(
-      { ...DEFAULTS, ...shot, ...geometry } as Adjustments,
+      { ...defaultsFor(path), ...shot, ...geometry } as Adjustments,
       Boolean(shot),
       DEFAULT_PROFILE,
       DEFAULT_MIXER,
@@ -2025,6 +2027,63 @@ export default function App() {
     },
     [currentPath, record],
   );
+  // Several of the photo's settings at once, as one undo step per `key` (Defringe's hue range).
+  const setPhotoValues = useCallback(
+    (changes: Record<string, number>) => {
+      if (!currentPath) return;
+      record(currentPath, `values:${Object.keys(changes).sort().join(",")}`);
+      setEdits((prev) => ({ ...prev, [currentPath]: { ...prev[currentPath], ...changes } }));
+    },
+    [currentPath, record],
+  );
+  // The pickers (Lightroom's eyedroppers): White balance (W/B panel) and Defringe (Lens menu).
+  // Waiting for one click on the photo, then closed; another photo, or Esc, closes it too.
+  const [picker, setPicker] = useState<PickerKind | null>(null);
+  // The pickers' messages float over the photo for a few seconds: the notice banner sits in the
+  // page's flow, so it pushed the photo down (the jump after a pick, 1 Nov).
+  const [pickNote, setPickNote] = useState<string | null>(null);
+  useEffect(() => {
+    if (!pickNote) return;
+    const t = window.setTimeout(() => setPickNote(null), 3500);
+    return () => window.clearTimeout(t);
+  }, [pickNote]);
+  useEffect(() => setPicker(null), [currentPath]);
+  const togglePicker = useCallback((kind: PickerKind) => setPicker((p) => (p === kind ? null : kind)), []);
+  const pickAt = useCallback(
+    async (kind: PickerKind, x: number, y: number) => {
+      const path = currentPath;
+      if (!path) return;
+      setPicker(null);
+      try {
+        const p = await pickColour(path, engineSettingsRef.current, x, y);
+        if (kind === "wb") {
+          if (p.temperature == null || p.tint == null) {
+            setPickNote("No white balance from there: pick something lighter and closer to grey");
+            return;
+          }
+          record(path, null);
+          setEdits((prev) => ({ ...prev, [path]: { ...prev[path], temperature: Math.round(p.temperature!), tint: Math.round(p.tint!) } }));
+          return;
+        }
+        if (!p.fringe) {
+          setPickNote("No fringe colour there: click right on the purple or green edge (zoom in to see it)");
+          return;
+        }
+        const [kind2, lo, hi] = p.fringe;
+        const cap = kind2 === "purple" ? "Purple" : "Green";
+        const amount = editState.current.edits[path]?.[`defringe${cap}`] ?? 0;
+        record(path, null);
+        setEdits((prev) => ({
+          ...prev,
+          [path]: { ...prev[path], [`defringe${cap}HueLo`]: lo, [`defringe${cap}HueHi`]: hi, ...(amount > 0 ? {} : { [`defringe${cap}`]: 5 }) },
+        }));
+        setPickNote(`${cap} fringe picked: hue ${lo}–${hi}${amount > 0 ? "" : ", amount 5"}`);
+      } catch (e) {
+        setPickNote(`Couldn't read the colour there: ${e}`);
+      }
+    },
+    [currentPath, record],
+  );
   // A lens chosen for every photo with this EXIF lens name: remembered by the engine; the
   // photos with that name (read from their metadata) are redone.
   const chooseLens = useCallback(
@@ -2387,7 +2446,7 @@ export default function App() {
   // RapidOne preset (named as in Lightroom); a RapidOne backup (.rpp) is
   // saved as it is. The same name replaces a preset.
   const importLightroomPresets = useCallback(async () => {
-    const chosen = await open({ multiple: true, filters: [{ name: "Presets (Lightroom .xmp, RapidOne .rpp)", extensions: ["xmp", "XMP", "rpp", "RPP"] }] });
+    const chosen = await open({ multiple: true, filters: [{ name: "Presets (.xmp, RapidOne .rpp)", extensions: ["xmp", "XMP", "rpp", "RPP"] }] });
     const files = typeof chosen === "string" ? [chosen] : (chosen ?? []);
     if (files.length === 0) return;
     const names: string[] = [];
@@ -2451,7 +2510,7 @@ export default function App() {
         if (own && !newerXmp) {
           const snap = snapshotFromEdit(own.edit);
           sidecarOrigin.current.set(path, own.origin);
-          const look = own.look ?? (own.origin === "lightroom-xmp" ? { from: "xmp" as const, name: "Lightroom XMP" } : null);
+          const look = own.look ?? (own.origin === "lightroom-xmp" ? { from: "xmp" as const, name: "XMP edit" } : null);
           if (look) setLook([path], look);
           sidecarWritten.current.set(path, JSON.stringify([editFromSnapshot(snap), own.rating, own.pick, own.look ?? null]));
           restore(path, snap);
@@ -2464,14 +2523,14 @@ export default function App() {
         bumpSidecars((n) => n + 1);
         if (!lr || Object.keys(editedRef.current[path] ?? {}).length > 0) return;
         sidecarOrigin.current.set(path, "lightroom-xmp");
-        setLook([path], { from: "xmp", name: "Lightroom XMP" });
+        setLook([path], { from: "xmp", name: "XMP edit" });
         applyRef.current([path], lr);
         // Its crop too (converted from Lightroom's in preset.rs).
         const lrCrop = lr.crop;
         if (lrCrop) setCropByPath((prev) => withEntry(prev, path, lrCrop));
         const lrGradients = lr.gradients;
         if (lrGradients?.length) setGradientsByPath((prev) => withEntry(prev, path, lrGradients));
-        if (!quiet) setNotice(describeApplied(lr, "Lightroom edit", adobeAvailable));
+        if (!quiet) setNotice(describeApplied(lr, "XMP edit", adobeAvailable));
         // Let the state land, so the edit can be read back (Export does).
         await new Promise((resolve) => setTimeout(resolve, 100));
       })();
@@ -2838,6 +2897,8 @@ export default function App() {
           ? ids("Parametric")
           : name === "Effects"
             ? [...ids("Effects"), ...ids("Legacy vignette")]
+            : name === "Sharpen"
+              ? [...ids("Sharpen"), ...ids("Legacy noise")]
             : name === "Keystone"
               ? [...ids("Keystone"), "autoTransform"]
               : ids(name);
@@ -3284,7 +3345,7 @@ export default function App() {
   const settingsForExport = useCallback(
     (path: string): RenderSettings => {
       const s = snapshotOf(path);
-      const values = { ...DEFAULTS, ...s.edits } as Adjustments;
+      const values = { ...defaultsFor(path), ...s.edits } as Adjustments;
       const settings = engineSettingsFrom(
         values,
         false,
@@ -3588,6 +3649,10 @@ export default function App() {
             onPhoto={setLensPhoto}
             onChoose={(exif, id) => void chooseLens(exif, id)}
             onLoadProfiles={() => void loadLensProfiles()}
+            values={values}
+            onSet={setPhotoValues}
+            picking={picker === "fringe"}
+            onPickFringe={() => togglePicker("fringe")}
           />
         }
         autoStyleMenu={
@@ -3637,6 +3702,7 @@ export default function App() {
           </button>
         </div>
       )}
+      {pickNote && <div className="pick-toast">{pickNote}</div>}
       {notice && (
         <div className="notice-banner">
           <span>{notice}</span>
@@ -3720,6 +3786,11 @@ export default function App() {
             compareWith={compareWith}
             onCompareWith={setCompareWith}
             noCompare={libraryView}
+            pickOverlay={
+              picker && mode === "edit" && !libraryView
+                ? (image) => <PickOverlay kind={picker} image={image} onPick={(x, y) => void pickAt(picker, x, y)} onCancel={() => setPicker(null)} />
+                : undefined
+            }
             onCompareStart={() => compareWith === "before" && requestBefore(currentPath)}
             keysActive={mode === "edit" && !atHome && !cropping && menu === null}
             values={values}
@@ -3810,6 +3881,8 @@ export default function App() {
             <div className="panel-dock" ref={dockRef}>
             <BottomPanel
               onGroupMenu={openPanelMenu}
+              wbPicking={picker === "wb"}
+              onPickWhiteBalance={() => togglePicker("wb")}
               values={panelValues}
               neutrals={panelNeutrals}
               mask={

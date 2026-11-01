@@ -15,10 +15,10 @@ pub(crate) fn encode(e: &Engine, enc: &mut wgpu::CommandEncoder, packed: &wgpu::
     let plane = |label| e.buffer(label, (n * 4) as u64);
     let mut cur = packed.clone();
     if d.sharpen > 0.0 && w >= 3 && h >= 3 {
-        use crate::detail::{RL_G, RL_HALO, RL_MIN_SIGMA, RL_P, RL_ROUNDS, RL_SIGMA};
+        use crate::detail::{RL_HALO, RL_MIN_SIGMA, RL_ROUNDS, RL_SIGMA};
         let amount = d.sharpen.min(150.0);
         let sigma = (RL_SIGMA * d.scale).max(RL_MIN_SIGMA);
-        let gain = RL_G * (amount / 100.0).powf(RL_P);
+        let gain = crate::detail::rl_gain(amount);
         let (taps, r) = crate::detail::gaussian_taps(sigma);
         let taps = e.storage("taps", bytemuck::cast_slice(&taps));
         let lin = e.buffer("linear", (n * 12) as u64);

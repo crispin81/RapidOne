@@ -298,6 +298,7 @@ impl LightroomSettings {
                 "blacks" => Some(&mut s.blacks),
                 "vibrance" => Some(&mut s.vibrance),
                 "saturation" => Some(&mut s.saturation),
+                "colourNoise" => Some(&mut t.colour_noise),
                 "texture" => Some(&mut t.texture),
                 "clarity" => Some(&mut t.clarity),
                 "dehaze" => Some(&mut t.dehaze),
@@ -368,7 +369,7 @@ impl LightroomSettings {
 }
 
 /// Lightroom name -> the app's slider id.
-const SLIDERS: [(&str, &str); 36] = [
+const SLIDERS: [(&str, &str); 43] = [
     ("ParametricShadows", "paramShadows"),
     ("ParametricDarks", "paramDarks"),
     ("ParametricLights", "paramLights"),
@@ -389,6 +390,7 @@ const SLIDERS: [(&str, &str); 36] = [
     ("Saturation", "saturation"),
     ("Sharpness", "sharpen"),
     ("LuminanceSmoothing", "noise"),
+    ("ColorNoiseReduction", "colourNoise"),
     ("PostCropVignetteAmount", "vignette"),
     ("PostCropVignetteMidpoint", "vignetteMidpoint"),
     ("PostCropVignetteFeather", "vignetteFeather"),
@@ -405,6 +407,13 @@ const SLIDERS: [(&str, &str); 36] = [
     ("PerspectiveRotate", "rotate"),
     ("PerspectiveVertical", "vertical"),
     ("PerspectiveHorizontal", "horizontal"),
+    // Lens Corrections' Defringe (`defringe.rs`): Lightroom's numbers as they are.
+    ("DefringePurpleAmount", "defringePurple"),
+    ("DefringePurpleHueLo", "defringePurpleHueLo"),
+    ("DefringePurpleHueHi", "defringePurpleHueHi"),
+    ("DefringeGreenAmount", "defringeGreen"),
+    ("DefringeGreenHueLo", "defringeGreenHueLo"),
+    ("DefringeGreenHueHi", "defringeGreenHueHi"),
 ];
 
 const BANDS: [(&str, &str); 8] = [
@@ -423,9 +432,7 @@ const BANDS: [(&str, &str); 8] = [
 /// skipped only when set to something else - and, for a setting that only
 /// shapes another (vignette shape, grain size, sharpening detail), only when
 /// that one is in use.
-/// Colour noise reduction isn't listed: it changes only noise, not tone or
-/// colour (Lightroom applies 25 to every RAW by default).
-const NOT_YET: [(&str, &str, &str, Option<&str>); 13] = [
+const NOT_YET: [(&str, &str, &str, Option<&str>); 11] = [
     ("SharpenRadius", "+1.0", "Sharpening radius/detail/masking", Some("Sharpness")),
     ("SharpenDetail", "25", "Sharpening radius/detail/masking", Some("Sharpness")),
     ("SharpenEdgeMasking", "0", "Sharpening radius/detail/masking", Some("Sharpness")),
@@ -434,8 +441,6 @@ const NOT_YET: [(&str, &str, &str, Option<&str>); 13] = [
     ("AutoLateralCA", "0", "Chromatic aberration removal", None),
     ("LensManualDistortionAmount", "0", "Manual lens distortion", None),
     ("VignetteAmount", "0", "Lens vignetting", None),
-    ("DefringePurpleAmount", "0", "Defringe", None),
-    ("DefringeGreenAmount", "0", "Defringe", None),
     ("GrainSize", "25", "Grain size/roughness", Some("GrainAmount")),
     ("PostCropVignetteStyle", "1", "Vignette style", Some("PostCropVignetteAmount")),
     ("ConvertToGrayscale", "False", "Black & white", None),
@@ -457,6 +462,14 @@ pub fn parse(xmp: &str) -> LightroomSettings {
     for (lr, id) in SLIDERS {
         if let Some(v) = num(lr) {
             out.sliders.insert(id.to_string(), v);
+        }
+    }
+    // A Defringe colour's hue range only matters with its Amount up (Lightroom writes the
+    // ranges into every edit): without it, leave the photo's own range alone.
+    for (amount, lo, hi) in [("defringePurple", "defringePurpleHueLo", "defringePurpleHueHi"), ("defringeGreen", "defringeGreenHueLo", "defringeGreenHueHi")] {
+        if out.sliders.get(amount).map_or(true, |&v| v <= 0.0) {
+            out.sliders.remove(lo);
+            out.sliders.remove(hi);
         }
     }
     // Noise: RapidOne's is AI noise reduction (a blend towards the cleaned
@@ -999,5 +1012,15 @@ mod gradient_import_tests {
         let g = turn_gradients(&s.lightroom_gradients, s.orientation, 8, 1.5).unwrap();
         let lin = g.iter().find(|g| g.kind == Kind::Linear).unwrap();
         assert!((lin.full[0] - 0.0).abs() < 1e-6 && (lin.zero[0] - 0.5).abs() < 1e-6, "{:?}", (lin.full, lin.zero));
+    }
+
+    #[test]
+    fn reads_defringe() {
+        let s = parse(r#"<rdf:Description crs:DefringePurpleAmount="6" crs:DefringePurpleHueLo="25" crs:DefringePurpleHueHi="75" crs:DefringeGreenAmount="0" crs:DefringeGreenHueLo="40" crs:DefringeGreenHueHi="60"/>"#);
+        assert_eq!(s.sliders["defringePurple"], 6.0);
+        assert_eq!((s.sliders["defringePurpleHueLo"], s.sliders["defringePurpleHueHi"]), (25.0, 75.0));
+        // Green's Amount is 0: its range is left out, and nothing is skipped.
+        assert!(!s.sliders.contains_key("defringeGreenHueLo"));
+        assert!(!s.skipped.iter().any(|k| k == "Defringe"), "{:?}", s.skipped);
     }
 }

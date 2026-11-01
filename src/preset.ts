@@ -136,7 +136,7 @@ export function parsePreset(text: string): RapidPreset | null {
 
 /** A Lightroom preset converted to RapidOne's (named as in Lightroom, else after its file). */
 export function presetFromLightroom(lr: LightroomSettings, fileName: string): RapidPreset {
-  const name = (lr.name ?? fileName.replace(/\.xmp$/i, "")).trim() || "Lightroom preset";
+  const name = (lr.name ?? fileName.replace(/\.xmp$/i, "")).trim() || "Imported preset";
   return { format: PRESET_FORMAT, version: 1, name, origin: "lightroom", settings: { ...lr, name } };
 }
 

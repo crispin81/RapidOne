@@ -182,8 +182,8 @@ export default function VSlider({ def, value, neutral, active, showName, onChang
           onWheel={onWheel}
           role="slider"
           aria-label={def.label}
-          aria-valuemin={def.min}
-          aria-valuemax={def.max}
+          aria-valuemin={def.lowest ?? def.min}
+          aria-valuemax={def.highest ?? def.max}
           aria-valuenow={value}
           aria-orientation="vertical"
         >
@@ -192,6 +192,13 @@ export default function VSlider({ def, value, neutral, active, showName, onChang
             ref={trackRef}
             style={def.trackGradient ? { background: def.trackGradient } : undefined}
           >
+            {/* The parts of the track it can't reach (Noise below 0), shown blocked, a bar at each stop. */}
+            {def.lowest != null && toFraction(def, def.lowest) > 0 && (
+              <div className="vslider__blocked vslider__blocked--low" style={{ height: `${toFraction(def, def.lowest) * 100}%` }} />
+            )}
+            {def.highest != null && toFraction(def, def.highest) < 1 && (
+              <div className="vslider__blocked vslider__blocked--high" style={{ height: `${(1 - toFraction(def, def.highest)) * 100}%` }} />
+            )}
             {/* Colour-scale tracks (Temperature, Tint) show the scale instead of a gold fill, as in RapidRetouch. */}
             {!def.trackGradient && (
               // Raised above its neutral: neon orange; lowered: cyan.

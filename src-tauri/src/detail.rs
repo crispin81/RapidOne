@@ -23,10 +23,15 @@ use rayon::prelude::*;
 pub(crate) const RL_SIGMA: f32 = 0.7;
 pub(crate) const RL_ROUNDS: usize = 20;
 pub(crate) const RL_HALO: f32 = 0.5;
-pub(crate) const RL_G: f32 = 2.873;
-pub(crate) const RL_P: f32 = 1.201;
+/// Gain by Amount, fitted to Lightroom's detail at the same numbers (`examples/colournoise_match.rs sharpfit`).
+const RL_GAINS: [[f32; 2]; 6] = [[0.0, 0.0], [25.0, 0.42], [50.0, 0.73], [80.0, 1.39], [120.0, 2.98], [150.0, 4.55]];
 /// Smallest sigma used on a shrunken picture (below it the effect vanishes).
 pub(crate) const RL_MIN_SIGMA: f32 = 0.45;
+/// Sharpen below zero softens (as Lightroom's mask Sharpness does; its global Amount stops at 0):
+/// at -150 (the slider's end, so 0 is centred) the brightness is a Gaussian of this sigma in full-sensor pixels, with a floor so the
+/// preview still shows it. Chosen by eye, not fitted (2026-11-01).
+pub(crate) const SOFTEN_SIGMA: f32 = 2.0;
+pub(crate) const SOFTEN_MIN_SIGMA: f32 = 0.6;
 
 /// Grain's strength at 100, and its share at black / white and the extra at mid-grey.
 pub(crate) const GRAIN_AMOUNT: f32 = 0.12;
@@ -192,9 +197,18 @@ fn gaussian_rows(src: &[f32], w: usize, h: usize, sigma: f32, finish: impl Fn(us
     );
 }
 
+/// Added to the light before its cube root in sharpening, so near-black doesn't swing wildly.
+const RL_ROOT_FLOOR: f32 = 0.002;
+
+/// Sharpening's gain at `amount` (`RL_GAINS`, straight lines between).
+pub(crate) fn rl_gain(amount: f32) -> f32 {
+    let at = RL_GAINS.windows(2).find(|w| amount <= w[1][0]).unwrap_or(&RL_GAINS[RL_GAINS.len() - 2..]);
+    at[0][1] + (at[1][1] - at[0][1]) * (amount - at[0][0]) / (at[1][0] - at[0][0])
+}
+
 /// Lightroom-fitted sharpening (Amount 0..150): Richardson-Lucy on linear
 /// brightness, the change limited near edges (no halos), every channel
-/// scaled by the brightness change. `scale`: this picture's long edge over
+/// moved by the brightness change, in cube roots. `scale`: this picture's long edge over
 /// the sensor's.
 fn sharpen_rl<T: Channel>(img: &mut ImageBuffer<Rgb<T>, Vec<T>>, amount: f32, scale: f32)
 where
@@ -205,7 +219,7 @@ where
         return;
     }
     let sigma = (RL_SIGMA * scale).max(RL_MIN_SIGMA);
-    let gain = RL_G * (amount / 100.0).powf(RL_P);
+    let gain = rl_gain(amount);
     // sRGB to linear by table (every 8- or 16-bit value once), on all cores.
     let table: Vec<f32> = (0..=T::MAX as u32).map(|v| srgb_to_lin(v as f32 / T::MAX)).collect();
     let lin: Vec<[f32; 3]> = img.as_raw().par_chunks(3).map(|p| [0, 1, 2].map(|c| table[p[c].to_f32() as usize])).collect();
@@ -255,8 +269,14 @@ where
             }
             let limit = RL_HALO * (hi - lo);
             let d = (u[i] - y[i]).clamp(-limit, limit);
-            let k = if y[i] > 1e-6 { ((y[i] + gain * d) / y[i]).max(0.0) } else { 1.0 };
-            lin[i].map(|c| c * k)
+            // The brightness change as a shift in cube roots, the same for each channel: colour differences
+            // (as CIELAB's) stay as they are, where scaling the channels would amplify leftover colour noise.
+            let root = |v: f32| (v + RL_ROOT_FLOOR).cbrt();
+            let shift = root((y[i] + gain * d).max(0.0)) - root(y[i]);
+            lin[i].map(|c| {
+                let r = root(c) + shift;
+                (r * r * r - RL_ROOT_FLOOR).max(0.0)
+            })
         })
         .collect();
     // Back to sRGB on all cores.
@@ -268,7 +288,44 @@ where
     });
 }
 
-/// Applies sharpening (`sharpen`, 0..150, Lightroom-fitted; `scale` is the
+/// Negative Sharpen (`amount` 0..150 here): linear brightness drawn towards its Gaussian blur
+/// (`SOFTEN_SIGMA`), all of the way at 150, every channel scaled by the brightness change so
+/// colours stay put. `scale`: this picture's long edge over the sensor's.
+fn soften<T: Channel>(img: &mut ImageBuffer<Rgb<T>, Vec<T>>, amount: f32, scale: f32)
+where
+    Rgb<T>: image::Pixel<Subpixel = T>,
+{
+    let (w, h) = (img.width() as usize, img.height() as usize);
+    if w < 3 || h < 3 || amount <= 0.0 {
+        return;
+    }
+    let sigma = (SOFTEN_SIGMA * scale).max(SOFTEN_MIN_SIGMA);
+    let k = (amount / 150.0).min(1.0);
+    let table: Vec<f32> = (0..=T::MAX as u32).map(|v| srgb_to_lin(v as f32 / T::MAX)).collect();
+    let lin: Vec<[f32; 3]> = img.as_raw().par_chunks(3).map(|p| [0, 1, 2].map(|c| table[p[c].to_f32() as usize])).collect();
+    let y: Vec<f32> = lin.par_iter().map(|c| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]).collect();
+    let mut soft = vec![0.0f32; y.len()];
+    struct Rows(*mut f32);
+    unsafe impl Send for Rows {}
+    unsafe impl Sync for Rows {}
+    let out = Rows(soft.as_mut_ptr());
+    let out = &out;
+    gaussian_rows(&y, w, h, sigma, |row_y, b| {
+        // SAFETY: row `row_y` of `soft` (w values from row_y * w, inside it) is written by this call only.
+        let r = unsafe { std::slice::from_raw_parts_mut(out.0.add(row_y * w), w) };
+        r.copy_from_slice(b);
+    });
+    let raw: &mut [T] = img;
+    raw.par_chunks_mut(3).enumerate().for_each(|(i, p)| {
+        let target = y[i] + k * (soft[i] - y[i]);
+        let gain = if y[i] > 1e-6 { (target / y[i]).max(0.0) } else { 1.0 };
+        for c in 0..3 {
+            p[c] = T::from_f32(lin_to_srgb(lin[i][c] * gain) * T::MAX);
+        }
+    });
+}
+
+/// Applies sharpening (`sharpen`, -150..150, below 0 softening, Lightroom-fitted; `scale` is the
 /// picture's long edge over the sensor's), then noise reduction (`noise`,
 /// 0..100, simple) and grain (`grain`, 0..100), to brightness only.
 pub fn apply<T: Channel>(img: &mut ImageBuffer<Rgb<T>, Vec<T>>, sharpen: f32, noise: f32, grain: f32, scale: f32)
@@ -277,6 +334,8 @@ where
 {
     if sharpen > 0.0 {
         sharpen_rl(img, sharpen.min(150.0), scale);
+    } else if sharpen < 0.0 {
+        soften(img, -sharpen, scale);
     }
     if noise <= 0.0 && grain <= 0.0 {
         return;

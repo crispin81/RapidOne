@@ -49,7 +49,7 @@ pub fn look(photo: &Path) -> Option<serde_json::Value> {
         return Some(look.clone());
     }
     (v.get("origin").and_then(serde_json::Value::as_str) == Some("lightroom-xmp") && v.get("edit").is_some_and(edit_has_content))
-        .then(|| serde_json::json!({ "from": "xmp", "name": "Lightroom XMP" }))
+        .then(|| serde_json::json!({ "from": "xmp", "name": "XMP edit" }))
 }
 
 /// Whether the photo's `.rpd` has Noise (AI noise reduction) on.

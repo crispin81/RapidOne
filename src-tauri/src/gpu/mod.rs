@@ -339,18 +339,29 @@ struct SceneKey {
 }
 
 impl SceneKey {
-    /// The scene's place in memory, size and a sample of its pixels: a new scene in the same place
-    /// with the same size and the same 256 sampled pixels would be taken for the old one.
+    /// The scene's place in memory, size and a hash of every pixel. Every pixel, not a sample: a
+    /// scene changed only along edges (Defringe) or in one spot (a removal) can come back in the
+    /// same place with the same size, and a sample would miss the change.
     fn of(s: &SceneImage) -> SceneKey {
+        use rayon::prelude::*;
         let n = s.px.len();
-        let mut sum = [0u32; 4];
-        for k in 0..256usize {
-            let p = s.px[(k * 7919 * 131 + k) % n.max(1)];
-            for c in 0..3 {
-                sum[c] = sum[c].wrapping_mul(31).wrapping_add(p[c].to_bits());
-            }
-            sum[3] = sum[3].wrapping_add(p[0].to_bits() ^ p[2].to_bits().rotate_left(7));
-        }
+        let mix = |a: [u32; 4], b: [u32; 4]| -> [u32; 4] { std::array::from_fn(|c| a[c].wrapping_mul(0x9E37_79B1).rotate_left(5) ^ b[c]) };
+        let sum = s
+            .px
+            .par_chunks(4096)
+            .map(|chunk| {
+                let mut h = [0x811C_9DC5u32, 0x0100_0193, 0x2545_F491, 0x6C8E_9CF5];
+                for p in chunk {
+                    for c in 0..3 {
+                        h[c] = (h[c] ^ p[c].to_bits()).wrapping_mul(0x0100_0193);
+                    }
+                    h[3] = (h[3] ^ p[0].to_bits() ^ p[2].to_bits().rotate_left(7)).wrapping_mul(0x0100_0193);
+                }
+                h
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .fold([0u32; 4], mix);
         SceneKey { ptr: s.px.as_ptr() as usize, len: n, width: s.width, sum }
     }
 }

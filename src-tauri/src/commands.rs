@@ -119,7 +119,7 @@ fn process_photo(raw_path: &Path, jpeg_path: Option<&Path>) -> Result<PhotoInfo,
         edited: photo_edited(raw_path),
         look: crate::sidecar::look(raw_path).or_else(|| {
             (crate::sidecar::lightroom_applies(raw_path) && crate::preset::for_photo(raw_path).is_some())
-                .then(|| serde_json::json!({ "from": "xmp", "name": "Lightroom XMP" }))
+                .then(|| serde_json::json!({ "from": "xmp", "name": "XMP edit" }))
         }),
         denoised: crate::sidecar::denoised(raw_path),
     })
@@ -427,6 +427,7 @@ impl SceneCache {
             subject_mask: scene.subject_mask.get().cloned().map(std::sync::OnceLock::from).unwrap_or_default(),
             subject_refined: scene.subject_refined.get().cloned().map(std::sync::OnceLock::from).unwrap_or_default(),
             denoised: Default::default(),
+            colour_cleaned: Default::default(),
         });
         let mut small_entries = self.small.lock().unwrap();
         small_entries.retain(|(k, _)| *k != key);
@@ -472,8 +473,9 @@ fn render_scene(
     preview_of(path, scene, settings, &img, PREVIEW_JPEG_QUALITY)
 }
 
-/// The viewer's picture at rest: JPEG quality 75, as the image crate's JPEG writer had it.
-const PREVIEW_JPEG_QUALITY: u8 = 75;
+/// The viewer's picture at rest: JPEG quality 85 (75 before 1 Nov, as the image crate's writer had
+/// it), colour at full size (jpeg.rs).
+const PREVIEW_JPEG_QUALITY: u8 = 85;
 /// A slider drag's frames: smaller than the photo on screen and stretched up to it, so quality 75's
 /// blocks were stretched too and the photo looked heavily compressed while it moved (27 Oct). They're
 /// small, so the better quality costs a few ms.
@@ -552,7 +554,8 @@ fn render_image_depth(scene: &crate::develop::Scene, settings: &crate::pipeline:
     let t = &settings.tools;
     // Sharpening and grain on the GPU with the render when it renders it (`gpu::want_detail`): the
     // picture's long edge over the sensor's, as below.
-    let wanted = (t.sharpen > 0.0 || t.grain > 0.0).then(|| {
+    // Negative Sharpen (softening) is on the CPU only: with it, all of detail goes there.
+    let wanted = (t.sharpen >= 0.0 && (t.sharpen > 0.0 || t.grain > 0.0)).then(|| {
         let long = match &settings.region {
             Some(r) => r.frame.full_w.max(r.frame.full_h),
             None => scene.image.width.max(scene.image.height) as f32,
@@ -573,7 +576,7 @@ fn render_image_depth(scene: &crate::develop::Scene, settings: &crate::pipeline:
         None => img.width().max(img.height()) as f32,
     };
     let scale = (long / scene.image.source_long.max(1) as f32).min(1.0);
-    if (t.sharpen > 0.0 || t.grain > 0.0) && !detail_on_gpu {
+    if (t.sharpen != 0.0 || t.grain > 0.0) && !detail_on_gpu {
         let _p = crate::prof::span("sharpen / grain");
         img = match img {
             ImageRgb16(mut rgb) => {
@@ -637,6 +640,14 @@ pub async fn lens_info(cache: tauri::State<'_, SceneCache>, path: String, lens_i
     .map_err(|e| e.to_string())?
 }
 
+/// The pickers (White balance, Defringe): the colour where the photo was clicked
+/// (`x`, `y`: fractions of the photo as shown) read for each (`pick.rs`).
+#[tauri::command]
+pub async fn pick_colour(cache: tauri::State<'_, SceneCache>, path: String, settings: crate::pipeline::RenderSettings, x: f32, y: f32) -> Result<crate::pick::Picked, String> {
+    let scene = cache.get_or_develop(&path)?;
+    tauri::async_runtime::spawn_blocking(move || crate::pick::pick(&scene, &settings, x, y)).await.map_err(|e| e.to_string())?
+}
+
 /// Chooses a lens for every photo whose EXIF names this lens (0: back to the database's match).
 #[tauri::command]
 pub fn lens_choose(exif: String, lens_id: u32) -> Result<(), String> {
@@ -683,6 +694,22 @@ pub async fn lens_db_save(files: Vec<(String, String)>, sha: String, date: Strin
     tauri::async_runtime::spawn_blocking(move || crate::lensfun::save_update(files, &sha, &date)).await.map_err(|e| e.to_string())?
 }
 
+/// Whether release `latest` ("v1.2.0") is newer than `current` ("1.1.0"), number by number; false for
+/// anything else (a pre-release's "1.2.0-rc1" counts as not a release).
+#[tauri::command]
+pub fn version_is_newer(latest: String, current: String) -> bool {
+    let parts = |v: &str| v.trim().trim_start_matches(['v', 'V']).split('.').map(|n| n.parse::<u64>().ok()).collect::<Option<Vec<u64>>>();
+    match (parts(&latest), parts(&current)) {
+        (Some(mut l), Some(mut c)) => {
+            let n = l.len().max(c.len());
+            l.resize(n, 0);
+            c.resize(n, 0);
+            l > c
+        }
+        _ => false,
+    }
+}
+
 /// Lenses in the database matching every word typed: (id, name), at most 40.
 #[tauri::command]
 pub fn lens_search(query: String) -> Vec<(u32, String)> {
@@ -693,6 +720,12 @@ fn render_image_tone(scene: &crate::develop::Scene, settings: &crate::pipeline::
     // AI noise reduction first (Noise, 0..100: how much of the cleaned
     // scene is used), so every other tool works on the cleaned picture.
     let noise = settings.tools.noise / 100.0;
+    // Colour noise reduction (Colour) under it: the AI cleans the unfiltered scene, its share rising
+    // with Noise, so the filter's is (100 - Noise)% and colour is never cleaned twice.
+    let full_long = settings.region.as_ref().map_or(scene.image.width.max(scene.image.height) as f32, |r| r.frame.full_w.max(r.frame.full_h));
+    let colour_scale = full_long / scene.image.source_long.max(1) as f32;
+    let filtered = if noise < 1.0 { crate::colournoise::for_scene(scene, settings.tools.colour_noise, colour_scale) } else { None };
+    let start = filtered.as_deref().unwrap_or(&scene.image);
     let cleaned = (noise > 0.0)
         .then(|| scene.denoised.get_or_init(|| crate::denoise::scene(&scene.image).map(std::sync::Arc::new)).clone())
         .flatten()
@@ -701,17 +734,26 @@ fn render_image_tone(scene: &crate::develop::Scene, settings: &crate::pipeline::
                 (*d).clone()
             } else {
                 use rayon::prelude::*;
-                let px = scene.image.px.par_iter().zip(d.px.par_iter()).map(|(o, c)| std::array::from_fn(|k| o[k] + (c[k] - o[k]) * noise)).collect();
+                let px = start.px.par_iter().zip(d.px.par_iter()).map(|(o, c)| std::array::from_fn(|k| o[k] + (c[k] - o[k]) * noise)).collect();
                 crate::pipeline::SceneImage { px, ..(*d).clone() }
             }
         });
-    let source = cleaned.as_ref().unwrap_or(&scene.image);
+    let source = cleaned.as_ref().unwrap_or(start);
     // Lens corrections (Lensfun): distortion, fringing and vignetting, first, so every
     // tool and the removals work on the corrected photo. A part of the photo (zoomed in)
     // comes already corrected (`zoom::render_part`).
     let lensfun = if settings.region.is_none() { lens_correction(scene, settings) } else { None };
     let fixed = lensfun.as_ref().map(|c| c.apply(source));
     let source = fixed.as_ref().unwrap_or(source);
+    // Defringe (purple / green fringes along edges), on the lens-corrected light. A part of the
+    // photo (zoomed in) comes already defringed (`zoom::render_part`).
+    let defringed = if settings.region.is_none() {
+        let scale = source.width.max(source.height) as f32 / source.source_long.max(1) as f32;
+        crate::defringe::apply(source, &crate::defringe::Defringe::from_settings(settings), scale)
+    } else {
+        None
+    };
+    let source = defringed.as_deref().unwrap_or(source);
     // Patches (Heal / Clone) and removed objects, in the order they were made, blended into the scene
     // light before every other tool. A part of the photo (zoomed in) comes with them already done
     // (`zoom::render_part`, its patches' sources being anywhere in the photo; it clears the list).
@@ -1438,7 +1480,7 @@ pub fn read_lightroom_preset(path: String) -> Result<crate::preset::LightroomSet
     let xmp = std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
     let settings = crate::preset::parse(&xmp);
     if settings.is_empty() {
-        return Err("No Lightroom develop settings in this file.".into());
+        return Err("No develop settings in this file.".into());
     }
     Ok(settings)
 }
@@ -1673,4 +1715,25 @@ pub(crate) fn bilinear(px: &[[f32; 3]], w: usize, h: usize, x: f32, y: f32) -> [
         let bottom = px[y1 * w + x0][c] + (px[y1 * w + x1][c] - px[y1 * w + x0][c]) * fx;
         top + (bottom - top) * fy
     })
+}
+
+#[cfg(test)]
+mod update_tests {
+    use super::version_is_newer as newer;
+
+    fn is(latest: &str, current: &str) -> bool {
+        newer(latest.into(), current.into())
+    }
+
+    #[test]
+    fn versions_compare_by_number() {
+        assert!(is("v1.2.0", "1.1.0"));
+        assert!(is("v1.10.0", "1.9.9"));
+        assert!(is("2.0", "1.9.9"));
+        assert!(!is("v1.1.0", "1.1.0"));
+        assert!(!is("v1.1", "1.1.0"));
+        assert!(!is("v1.0.9", "1.1.0"));
+        assert!(!is("v1.2.0-rc1", "1.1.0"));
+        assert!(!is("nonsense", "1.1.0"));
+    }
 }

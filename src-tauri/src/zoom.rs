@@ -79,7 +79,7 @@ impl MeasuredCache {
 
 /// The shown photo's size (after quarter turns and crop) for a photo w x h,
 /// as `crop::apply` makes it.
-fn shown_size(crop: &crate::crop::Crop, w: usize, h: usize) -> (f32, f32) {
+pub(crate) fn shown_size(crop: &crate::crop::Crop, w: usize, h: usize) -> (f32, f32) {
     let (wq, hq) = if crop.quarter % 2 == 1 { (h as f32, w as f32) } else { (w as f32, h as f32) };
     if crop.is_cut_free() {
         return (wq, hq);
@@ -92,7 +92,7 @@ fn shown_size(crop: &crate::crop::Crop, w: usize, h: usize) -> (f32, f32) {
 /// Where a point of the shown photo (pixels) comes from in the photo (w x h,
 /// upright as developed): the crop's straighten and cut undone, then the
 /// keystone, then the quarter turns, in `crop::apply`'s order.
-fn source_of(settings: &RenderSettings, w: usize, h: usize) -> impl Fn(f32, f32) -> Option<(f32, f32)> {
+pub(crate) fn source_of(settings: &RenderSettings, w: usize, h: usize) -> impl Fn(f32, f32) -> Option<(f32, f32)> {
     let crop = settings.crop;
     let q = crop.quarter % 4;
     let (wq, hq) = if q % 2 == 1 { (h as f32, w as f32) } else { (w as f32, h as f32) };
@@ -144,6 +144,10 @@ pub fn render_part(
     let out_w = (out_w as f32).min(dx1 - dx0).round().max(1.0) as u32;
     let out_h = (out_h as f32).min(dy1 - dy0).round().max(1.0) as u32;
     let sc = out_w as f32 / (dx1 - dx0);
+    // Down the picture its own scale: out_h is rounded on its own, and the viewer stretches the
+    // picture to the exact area each way. With `sc` for both, a small drag frame (20-80%) came out a
+    // fraction of a pixel taller or shorter than its area, a visible shift against the sharp one (1 Nov).
+    let sc_y = out_h as f32 / (dy1 - dy0);
     // Render at a whole-number fraction of full size when zoomed out (cheaper).
     let k = ((1.0 / sc).floor() as usize).max(1);
     let map = source_of(settings, w, h);
@@ -218,6 +222,11 @@ pub fn render_part(
         });
     }
     let mut part_image = SceneImage { width: rw, height: rh, px, source_long: full.image.source_long };
+    // Defringe, on the lens-corrected part as on the whole photo (at this part's scale: 1/k of full size).
+    let full_scale = w.max(h) as f32 / full.image.source_long.max(1) as f32;
+    if let Some(d) = crate::defringe::apply_part(&part_image, &crate::defringe::Defringe::from_settings(settings), full_scale / k as f32) {
+        part_image = d;
+    }
     // Patches (Heal / Clone), whose sources can be anywhere in the photo: read from the full-size
     // photo (through the lens correction, as the part is), at the part's 1/k scale.
     {
@@ -246,6 +255,8 @@ pub fn render_part(
         part_image = part_image.downscaled(((rw.max(rh) as f32) * rest).round().max(1.0) as usize);
     }
     let ps = part_image.width as f32 / rw as f32 / k as f32;
+    // Each way on its own (the downscale rounds width and height separately).
+    let ps_y = part_image.height as f32 / rh as f32 / k as f32;
     let part = Scene {
         image: part_image,
         camera: full.camera.clone(),
@@ -259,12 +270,13 @@ pub fn render_part(
         subject_mask: Default::default(),
         subject_refined: Default::default(),
         denoised: Default::default(),
+        colour_cleaned: Default::default(),
     };
     // The part's settings: placed in the whole photo, with its measures; no
     // geometry (done below); the subject vignette's weights from the whole photo.
     let mut s = settings.clone();
     s.region = Some(Arc::new(Region {
-        frame: Frame { x0: ax0 as f32 * ps, y0: ay0 as f32 * ps, full_w: w as f32 * ps, full_h: h as f32 * ps },
+        frame: Frame { x0: ax0 as f32 * ps, y0: ay0 as f32 * ps_y, full_w: w as f32 * ps, full_h: h as f32 * ps_y },
         measured,
     }));
     s.measure_into = None;
@@ -285,10 +297,10 @@ pub fn render_part(
     let (iw, ih) = (img.width() as f32, img.height() as f32);
     let out = image::RgbImage::from_fn(out_w, out_h, |ox, oy| {
         let x = dx0 + (ox as f32 + 0.5) / sc;
-        let y = dy0 + (oy as f32 + 0.5) / sc;
+        let y = dy0 + (oy as f32 + 0.5) / sc_y;
         match map(x, y) {
             Some((px, py)) => {
-                let (rx, ry) = ((px - ax0 as f32) * ps, (py - ay0 as f32) * ps);
+                let (rx, ry) = ((px - ax0 as f32) * ps, (py - ay0 as f32) * ps_y);
                 if rx < 0.0 || ry < 0.0 || rx > iw || ry > ih {
                     image::Rgb([255, 255, 255])
                 } else {

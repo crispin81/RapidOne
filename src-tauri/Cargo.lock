@@ -3871,7 +3871,7 @@ checksum = "ca45419789ae5a7899559e9512e58ca889e41f04f1f2445e9f4b290ceccd1d08"
 
 [[package]]
 name = "rapidone"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "base64 0.23.1",
  "bytemuck",
@@ -5048,7 +5048,7 @@ dependencies = [
 [[package]]
 name = "tauri-plugin-rapidretouch"
 version = "1.0.4"
-source = "git+https://github.com/crispin81/RapidRetouch-module?branch=module#37d0749aa30f3ec4e8cd8454109087f2af9e092e"
+source = "git+https://github.com/crispin81/RapidRetouch-module?branch=module#85465923d7e918c604bca7bc892b40bd4031ac6f"
 dependencies = [
  "serde_json",
  "tauri",

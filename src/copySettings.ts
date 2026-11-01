@@ -26,8 +26,8 @@ export const COPY_GROUPS: CopyGroup[] = [
   { id: "curves", label: "Curves", sliders: slidersOf("Parametric"), parts: ["curves"], byDefault: true },
   { id: "definition", label: "Definition (texture, clarity, dehaze, vibrance, saturation)", sliders: slidersOf("Definition"), parts: [], byDefault: true },
   { id: "colour", label: "Colour (profile, mixer, grade, fine tuning)", sliders: slidersOf("Fine tuning"), parts: ["profile", "mixer", "grade"], byDefault: true },
-  { id: "detail", label: "Sharpen and noise", sliders: slidersOf("Sharpen"), parts: [], byDefault: true },
-  { id: "lens", label: "Lens corrections", sliders: ["lensCorrect"], parts: [], byDefault: true },
+  { id: "detail", label: "Sharpen and noise", sliders: [...slidersOf("Sharpen"), ...slidersOf("Legacy noise")], parts: [], byDefault: true },
+  { id: "lens", label: "Lens corrections and defringe", sliders: ["lensCorrect", ...slidersOf("Defringe")], parts: [], byDefault: true },
   { id: "effects", label: "Effects (vignette, grain)", sliders: [...slidersOf("Effects"), ...slidersOf("Legacy vignette")], parts: [], byDefault: true },
   // autoTransform: which auto straighten the photo has (lights its button).
   { id: "keystone", label: "Keystone and rotation", sliders: [...slidersOf("Keystone"), "autoTransform"], parts: [], byDefault: false },

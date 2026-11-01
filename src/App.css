@@ -1278,6 +1278,25 @@ button.primary {
   background: #1a4552;
 }
 
+.vslider__blocked {
+  position: absolute;
+  left: -1px;
+  width: calc(100% + 2px);
+  border-radius: 2px;
+  pointer-events: none;
+  background: repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.14) 0 2px, transparent 2px 5px), #0d1b20;
+}
+
+.vslider__blocked--low {
+  bottom: 0;
+  border-top: 2px solid #3ee6ff;
+}
+
+.vslider__blocked--high {
+  top: 0;
+  border-bottom: 2px solid #3ee6ff;
+}
+
 .vslider__fill {
   position: absolute;
   left: 0;
@@ -2673,6 +2692,16 @@ button:not(:disabled):hover {
 }
 .viewer__grid line.viewer__grid-mid {
   stroke: rgba(62, 230, 255, 0.7);
+}
+
+/* The full-resolution render at Fit on a high-density screen (Viewer's fitDetail), over the 2400 px
+   preview, which stays underneath. */
+.viewer__frame > .viewer__img.viewer__img--fitdetail {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: none;
+  transition: none;
 }
 
 /* Hold-to-compare's Before, laid over the picture (which stays where it is, so letting go shows
@@ -4193,4 +4222,39 @@ button:not(:disabled):hover {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+/* The home screen's "Update available": only there when a newer release is out. */
+.update-chip {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 20;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(62, 230, 255, 0.55);
+  border-radius: 4px;
+  background: rgba(6, 12, 20, 0.85);
+  font-family: "Exo 2", system-ui, sans-serif;
+  font-size: 12px;
+}
+
+.update-chip button {
+  border: none;
+  background: none;
+  color: #3ee6ff;
+  cursor: pointer;
+}
+
+.update-chip__open {
+  padding: 5px 4px 5px 10px;
+}
+
+.update-chip__close {
+  display: flex;
+  padding: 5px 6px;
+}
+
+.update-chip button:hover {
+  color: rgb(255, 122, 26);
 }

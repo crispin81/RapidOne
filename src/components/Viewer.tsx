@@ -11,6 +11,7 @@ import { RotateCcw, RotateCw } from "lucide-react";
 import { BarGrip, useFloatingBar } from "../floatingBar";
 import { CROP_ASPECTS, NO_CROP, aspectRatio, cropOutline, cropToRatio, fitCrop, isNoCrop, straightCrop, type Crop } from "../crop";
 import CropOverlay from "./CropOverlay";
+import UpdateChip from "./UpdateChip";
 import GridScene, { PHOTO_RING, corridorFalloff, corridorPath, type Box } from "./GridScene";
 import TerminalPrompt from "./TerminalPrompt";
 import { keyLabel } from "../macKeys";
@@ -38,6 +39,11 @@ const MAC_NOTCH = 4.000244140625;
 const MAC_STEP_MS = 60;
 /** Two parts of the photo (fractions) the same, to a hair. */
 const sameRect = (a: readonly number[], b: readonly number[]) => a.every((v, i) => Math.abs(v - b[i]) < 1e-4);
+/** A patch from the same zoom and settings, only panned: it stays under the new one (both sharp and
+ * current, so its edges never show as a step) rather than the soft preview flashing between them (1 Nov). */
+// Also through zoom steps (any zoom, same settings): the last patch, scaled, is still sharper than the
+// stretched picture under it, so zooming quickly no longer drops to low resolution and back (1 Nov).
+const samePan = (a: { key: string; z?: number }, b: { key: string; z?: number }) => a.z != null && b.z != null && a.key === b.key;
 /** Windows' WebView2 (Chromium's engine): it skips painting fully transparent layers. */
 const CHROMIUM = /Edg\//.test(navigator.userAgent);
 function isMouseWheel(e: WheelEvent, now: number, touchpadUntil: number): boolean {
@@ -117,6 +123,8 @@ interface Props {
   onDetailActive?: (active: boolean) => void;
   /** Something covers the loupe (the Library's grid): no Before | After buttons over it. */
   noCompare?: boolean;
+  /** A picker (white balance, defringe) is open: its click layer, given the photo as shown. */
+  pickOverlay?: (image: HTMLImageElement | null) => ReactNode;
 }
 
 /**
@@ -286,6 +294,7 @@ export default function Viewer({
   onDetail,
   detailKey = "",
   onDetailActive,
+  pickOverlay,
 }: Props) {
   const [comparing, setComparing] = useState(false);
   // A new photo starts on After; \ switches Before / After (Edit only, not while typing).
@@ -437,6 +446,11 @@ export default function Viewer({
   // photo is clipped to the crop: what's cut away simply isn't drawn, and the corridor and halo sit
   // round the crop. The tools' marks and handles stay where they are. Only once the uncropped render
   // is up, never over the cropped picture still showing as they open.
+  // The picture on screen is the whole photo while the photo has a crop (Crop, Masks, Patch, Erase open).
+  // App flags every render made without a crop as `uncropped`, a photo with no crop too, where it
+  // makes no difference: read with the crop, or the pickers and the Fit render never came up on a
+  // photo with no crop (1 Nov).
+  const wholeOfCropped = (u: boolean | undefined) => Boolean(u) && !isNoCrop(crop);
   const clipOutline =
     removing && !cropping && !isNoCrop(crop) && onScreen?.engine && onScreen.uncropped ? cropOutline(crop, aspect) : null;
   const clipPath = clipOutline ? `polygon(${clipOutline.map(([x, y]) => `${x * 100}% ${y * 100}%`).join(", ")})` : undefined;
@@ -724,7 +738,7 @@ export default function Viewer({
   // computer: the last render's time sets it), the newest request winning;
   // dropped when the photo or its settings change. The preview stays under
   // it, so every change shows at once and sharpens a moment later.
-  const [detail, setDetail] = useState<{ key: string; rect: [number, number, number, number]; src: string; exposure: number } | null>(null);
+  const [detail, setDetail] = useState<{ key: string; rect: [number, number, number, number]; src: string; exposure: number; z?: number } | null>(null);
   const lastDetailMs = useRef(150);
   // While dragging: the resolution steps through 100/80/60/40/20% - down a
   // level while frames take over ~0.15 s, up a level when comfortably quicker
@@ -741,7 +755,14 @@ export default function Viewer({
     : null;
   const visibleKey = visible ? visible.map((v) => v.toFixed(4)).join(",") : "";
   // One render at a time; whatever was asked for meanwhile goes next (the newest only).
-  const wanted = useRef<{ key: string; rect: [number, number, number, number]; w: number; h: number; exposure: number; interactive: boolean } | null>(null);
+  const wanted = useRef<{ key: string; rect: [number, number, number, number]; w: number; h: number; exposure: number; interactive: boolean; fit?: boolean; z?: number } | null>(null);
+  // Fit matches the screen (as Lightroom's Develop): the 2400 px preview is a half-size (superpixel)
+  // develop, stretched on a 4K / 5K monitor or a laptop at 1.6x / 2x, and softer than the full demosaic
+  // even when shrunk; the photo only came out sharp once zoomed in, and soft again back at Fit (31 Oct).
+  // So once settled the whole photo is also rendered from the full-resolution data at the frame's own
+  // screen pixels, whatever the screen, and laid over the preview. Kept apart from the zoomed
+  // detail, so going back to Fit shows it at once.
+  const [fitDetail, setFitDetail] = useState<{ key: string; src: string; w: number; h: number } | null>(null);
   const inFlight = useRef(false);
   const onDetailRef = useRef(onDetail);
   onDetailRef.current = onDetail;
@@ -752,12 +773,24 @@ export default function Viewer({
     inFlight.current = true;
     const started = performance.now();
     onDetailRef.current(job.rect, job.w, job.h, job.interactive)
+      // Decoded before it goes up: a patch put up undecoded showed nothing for a frame or two, the soft
+      // preview flashing through it on every pan (1 Nov).
+      .then(async (src) => {
+        const im = new Image();
+        im.src = src;
+        await im.decode().catch(() => undefined);
+        return src;
+      })
       .then((src) => {
+        if (job.fit) {
+          setFitDetail({ key: job.key, src, w: job.w, h: job.h });
+          return;
+        }
         const ms = performance.now() - started;
         lastDetailMs.current = ms;
         if (job.interactive) dragScale.current.frame(ms);
         else dragScale.current.end();
-        setDetail({ key: job.key, rect: job.rect, src, exposure: job.exposure });
+        setDetail({ key: job.key, rect: job.rect, src, exposure: job.exposure, z: job.interactive ? undefined : job.z });
       })
       .catch(() => undefined)
       .finally(() => {
@@ -778,19 +811,105 @@ export default function Viewer({
   // resolution (about four times faster): soft while it moves, sharp the
   // moment it stops.
   const interactive = Boolean(still);
+  // The Fit render (above): only for the finished picture of the photo as it is framed: not while a slider
+  // moves (the preview's own quick frames show that), not over a stand-in, and not while cropping or with
+  // the uncropped picture clipped to the crop (the render is the framed photo).
+  const fitPx = { w: Math.round(fitW * dpr), h: Math.round(fitH * dpr) };
+  const fitWanted = Boolean(
+    !placed &&
+      onDetail &&
+      shown &&
+      shown.source === "engine" &&
+      !shown.pending &&
+      !wholeOfCropped(shown.uncropped) &&
+      onScreen?.engine &&
+      !onScreen.pending &&
+      !wholeOfCropped(onScreen.uncropped) &&
+      !cropping &&
+      !clipOutline &&
+      !interactive,
+  );
+  // Zoomed in: the Fit render (if made for these settings) under the detail instead of the 2400 px preview.
+  // A one-off change (a pick, a preset, a reset: no slider moving) keeps the last Fit render up until the
+  // one for the new settings lands, rather than the soft preview showing in between (the low-res moment
+  // on a defringe pick, 1 Nov). Not after a slider has moved since: that render is from before the drag.
+  const fitStaleOk = useRef(false);
+  const lastFitKey = useRef(detailKey);
+  const photoOfKey = (k: string) => k.split("\u0001")[0];
+  if (interactive) fitStaleOk.current = false;
+  else if (detailKey !== lastFitKey.current) fitStaleOk.current = photoOfKey(lastFitKey.current) === photoOfKey(detailKey);
+  lastFitKey.current = detailKey;
+  const fitStale =
+    // Not held to fitWanted: straight after a change the preview is marked pending while it re-renders,
+    // which hid this too and showed the soft stand-in (still glitching on a pick, 1 Nov).
+    fitStaleOk.current && !placed && !interactive && !comparing && !cropping && !clipOutline && fitDetail && fitDetail.key !== detailKey && photoOfKey(fitDetail.key) === photoOfKey(detailKey) ? fitDetail : null;
+  // Zoomed in: the Fit render under the detail instead of the 2400 px preview; after a one-off change,
+  // the last one until its successor lands (as at Fit).
+  const zoomBase =
+    fitDetail &&
+    (fitDetail.key === detailKey || (fitStaleOk.current && !interactive && photoOfKey(fitDetail.key) === photoOfKey(detailKey))) &&
+    onScreen?.engine &&
+    !wholeOfCropped(onScreen.uncropped)
+      ? fitDetail.src
+      : null;
+  const fitDetailShown =
+    fitStale ??
+    // Shown at any size while one for the new size is made (D65 Glow or Full frame on / off, the window
+    // resized): stretched a little, it's still sharper than the preview, and nothing flicks soft.
+    // Not hidden for a moment of `still` (a click in the panel, a picker's button) when nothing changed:
+    // it's for these very settings, so it stays, rather than the preview showing soft for a split second.
+    ((fitWanted || (!placed && interactive)) && !comparing && fitDetail && fitDetail.key === detailKey && !cropping && !clipOutline ? fitDetail : null);
   useEffect(() => {
+    if (!needDetail && fitWanted) {
+      if (fitDetail && fitDetail.key === detailKey && Math.abs(fitDetail.w - fitPx.w) <= 2) {
+        wanted.current = null;
+        return;
+      }
+      wanted.current = { key: detailKey, rect: [0, 0, 1, 1], w: fitPx.w, h: fitPx.h, exposure: values.exposure, interactive: false, fit: true };
+      // After a short pause: stepping through photos or resizing the window asks for only the last.
+      const timer = window.setTimeout(pump, 250);
+      return () => window.clearTimeout(timer);
+    }
     if (!needDetail || !visible || !placed || !onDetail) {
       wanted.current = null;
       return;
     }
+    // Settled, and the sharp part already on screen covers the view at this zoom (a pan within its
+    // margin): nothing to render.
+    if (
+      !interactive &&
+      detail &&
+      detail.key === detailKey &&
+      detail.z === zoom?.z &&
+      detail.rect[0] <= visible[0] + 1e-4 &&
+      detail.rect[1] <= visible[1] + 1e-4 &&
+      detail.rect[2] >= visible[2] - 1e-4 &&
+      detail.rect[3] >= visible[3] - 1e-4
+    ) {
+      wanted.current = null;
+      return;
+    }
     const k = interactive ? dragScale.current.scale : 1;
+    // Once settled, a margin round the part on screen (a quarter of the view each side, within the photo):
+    // a pan then moves onto sharp pixels, rather than the stretched preview, blocky at 100% (31 Oct),
+    // until the next render lands. Not while a slider moves (every frame counts there).
+    const m = interactive ? 0 : 0.25;
+    const mx = (visible[2] - visible[0]) * m;
+    const my = (visible[3] - visible[1]) * m;
+    const rect: [number, number, number, number] = [
+      Math.max(0, visible[0] - mx),
+      Math.max(0, visible[1] - my),
+      Math.min(1, visible[2] + mx),
+      Math.min(1, visible[3] + my),
+    ];
     wanted.current = {
       key: detailKey,
-      rect: visible,
-      w: Math.round((visible[2] - visible[0]) * placed.w * dpr * k),
-      h: Math.round((visible[3] - visible[1]) * placed.h * dpr * k),
+      rect,
+      w: Math.round((rect[2] - rect[0]) * placed.w * dpr * k),
+      h: Math.round((rect[3] - rect[1]) * placed.h * dpr * k),
       exposure: values.exposure,
       interactive,
+      z: zoom?.z,
     };
     // While a slider moves: straight away (one at a time, newest next); a
     // pause-wait would restart with every change and never fire mid-drag.
@@ -802,7 +921,7 @@ export default function Viewer({
     return () => window.clearTimeout(timer);
     // `visible` and `placed` follow visibleKey and the zoom.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [needDetail, visibleKey, detailKey, zoom?.z, dpr, interactive]);
+  }, [needDetail, visibleKey, detailKey, zoom?.z, dpr, interactive, fitWanted, fitPx.w, fitPx.h, fitDetail, detail]);
   // While a newer render is on its way, the detail shown is behind on
   // Exposure: bridged with the same quick approximation as the preview, so it
   // follows the slider at once and the next render only settles the rest.
@@ -819,12 +938,22 @@ export default function Viewer({
     // exposure, 24 Oct), so the soft preview, which is current, shows until
     // the patch for these settings lands. While a slider moves, the newest
     // patch stays, or the view would flick between sharp and soft.
-    detail && placed && needDetail && samePhoto(detail.key) && (interactive || detail.key === detailKey) ? detail : null;
-  const lastDetail = useRef<{ src: string; rect: [number, number, number, number] } | null>(null);
-  const underDetail = useRef<{ src: string; rect: [number, number, number, number] } | null>(null);
+    // After a one-off change (a pick, a preset: fitStaleOk), the last patch at this very zoom stays until
+    // the new one lands, rather than the stretched preview showing (1 Nov). A patch from another zoom
+    // with older settings still isn't shown (the 24 Oct "bright second").
+    detail &&
+    placed &&
+    needDetail &&
+    samePhoto(detail.key) &&
+    (interactive || detail.key === detailKey || (fitStaleOk.current && detail.z != null && detail.z === zoom?.z))
+      ? detail
+      : null;
+  type Patch = { src: string; rect: [number, number, number, number]; key: string; z?: number };
+  const lastDetail = useRef<Patch | null>(null);
+  const underDetail = useRef<Patch | null>(null);
   if ((detailShown?.src ?? null) !== (lastDetail.current?.src ?? null)) {
     underDetail.current = detailShown ? lastDetail.current : null;
-    lastDetail.current = detailShown ? { src: detailShown.src, rect: detailShown.rect } : null;
+    lastDetail.current = detailShown ? { src: detailShown.src, rect: detailShown.rect, key: detailShown.key, z: detailShown.z } : null;
   }
   // The zoom layer stays in place at Fit too, unseen, sized as Fit: WebKitGTK paints a layer made
   // on the first zoom step (or remade after Fit) a frame or two out of place, a visible jump.
@@ -886,6 +1015,7 @@ export default function Viewer({
                 resume={resumeSession}
               />
             )}
+            <UpdateChip />
           </div>
         ) : (
           <>
@@ -936,6 +1066,17 @@ export default function Viewer({
                           clipPath,
                         }
                   }
+                />
+              )}
+              {fitDetailShown && (
+                // The full-resolution render at Fit (see fitDetail), over the preview, which stays under it.
+                <img
+                  key={fitDetailShown.src.length + fitDetailShown.src.slice(-32)}
+                  className="viewer__img viewer__img--frame viewer__img--fitdetail"
+                  src={fitDetailShown.src}
+                  alt=""
+                  aria-hidden="true"
+                  draggable={false}
                 />
               )}
               {grid && (
@@ -994,7 +1135,7 @@ export default function Viewer({
                     title={
                       compareWith === "camera"
                         ? "The camera's own JPEG (\ key). Right-click: the photo with no edit instead"
-                        : "The photo with no edit, as Lightroom's Before (\ key). Right-click: the camera's own JPEG instead"
+                        : "The photo with no edit (\ key). Right-click: the camera's own JPEG instead"
                     }
                   >
                     {compareWith === "camera" ? "Camera" : "Before"}
@@ -1027,7 +1168,8 @@ export default function Viewer({
                   className={`viewer__img${onScreen?.pending ? " viewer__img--pending" : ""}`}
                   // The loupe's own picture (onScreen), whose shape the frame has: a newer render not yet
                   // decoded, of another shape (a crop over a stand-in), would show stretched for a moment.
-                  src={comparing && compareSrc ? compareSrc : (onScreen?.src ?? photo.thumbBase64)}
+                  // The Fit render, when there's one for these settings, is the sharper picture to pan over.
+                  src={comparing && compareSrc ? compareSrc : (zoomBase ?? onScreen?.src ?? photo.thumbBase64)}
                   alt=""
                   draggable={false}
                   style={{
@@ -1043,7 +1185,7 @@ export default function Viewer({
                     The previous patch stays under the new one only where they cover the same part (the
                     new one fading in over it): from another zoom or place it stuck out round the new
                     one, an odd square, at an older exposure after a change (24 Oct). */}
-                {underDetail.current && placed && !comparing && detailShown && sameRect(underDetail.current.rect, detailShown.rect) && (
+                {underDetail.current && placed && !comparing && detailShown && (sameRect(underDetail.current.rect, detailShown.rect) || samePan(underDetail.current, detailShown)) && (
                   <img
                     className="viewer__detail"
                     src={underDetail.current.src}
@@ -1101,6 +1243,9 @@ export default function Viewer({
                 <ZoomControls fit={!zoom} percent={zoomPercent} onFit={zoomFit} onPick={zoomPick} />,
                 zoomSlot,
               )}
+            {/* Not held back while a render is on its way (after a pick, the next wait was for the render, and
+                the picker seemed not to open again, 1 Nov): the colour is read from the photo itself. */}
+            {pickOverlay && !removing && !cropping && shown && !wholeOfCropped(shown.uncropped) && pickOverlay(placed ? zoomImgEl : imgEl)}
             {removing && preview?.path === photo.path && !preview.pending && removeOverlay?.(placed && overlayZooms ? (windowed ? zoomProxyEl : zoomImgEl) : windowed ? proxyEl : imgEl)}
             {cropping && preview?.path === photo.path && !preview.pending && (
               <>
@@ -1170,6 +1315,8 @@ export default function Viewer({
             )}
             {/* The file and camera line sits above the panel's tick-box row (Names, D65 Glow) on the
                 loupe's bottom edge, not behind it. */}
+            {/* Only at Fit with D65 Glow on: otherwise the photo fills the view and the line would sit on it (Chris, 1 Nov). */}
+            {surround && !zoom && !fullFrame && (
             <div className="viewer__meta" style={{ bottom: bottomInset + (bottomInset > 0 ? 34 : 6) }}>
               {/* All on the left: the file, its camera, which of how many, and (when it isn't the edited
                   photo itself) what's shown; the right is Before | After's. */}
@@ -1188,6 +1335,7 @@ export default function Viewer({
                       : " · Camera JPEG (engine can't read this file yet)"}
               </span>
             </div>
+            )}
           </>
         )}
       </div>

@@ -113,6 +113,7 @@ pub fn develop_scene(path: &Path, max_dim: usize) -> Result<crate::develop::Scen
         subject_mask: std::sync::OnceLock::new(),
         subject_refined: std::sync::OnceLock::new(),
         denoised: std::sync::OnceLock::new(),
+        colour_cleaned: Default::default(),
     })
 }
 

@@ -23,6 +23,8 @@ export interface PanelPicks {
   curvesTab: CurvesTab;
   /** Effects shows the legacy (Lightroom) vignette's sliders in place of the adaptive one. */
   legacyVignette?: boolean;
+  /** Sharpen also shows Colour noise reduction (the Legacy noise switch). */
+  legacyNoise?: boolean;
 }
 
 export const DEFAULT_PICKS: PanelPicks = { mixerBand: "orange", gradeRange: "mids", calPrimary: "Red", curvesTab: "luma" };

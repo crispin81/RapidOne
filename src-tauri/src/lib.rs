@@ -14,6 +14,8 @@ pub mod gradetable;
 pub mod demosaic;
 pub mod detail;
 pub mod develop;
+pub mod colournoise;
+pub mod defringe;
 pub mod denoise;
 pub mod diskcache;
 pub mod export;
@@ -32,6 +34,7 @@ pub mod lite;
 pub mod library;
 pub mod removal;
 pub mod patch;
+pub mod pick;
 pub mod pinch;
 pub mod mixtable;
 pub mod pipeline;
@@ -105,7 +108,9 @@ pub fn run() {
             commands::clear_handoffs,
             commands::mask_overlay,
             commands::lens_info,
+            commands::pick_colour,
             commands::lens_search,
+            commands::version_is_newer,
             commands::lens_db_version,
             commands::lens_choose,
             commands::lens_add_profiles,

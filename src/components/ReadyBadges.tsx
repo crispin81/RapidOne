@@ -32,7 +32,7 @@ export default function ReadyBadges({
         </span>
       )}
       {ready && look && (
-        <span className="thumb__ready" title={look.from === "preset" ? `Preset: ${look.name}` : look.from === "xmp" ? "Look from its Lightroom XMP" : `Style: ${look.name}`}>
+        <span className="thumb__ready" title={look.from === "preset" ? `Preset: ${look.name}` : look.from === "xmp" ? "Look from its XMP" : `Style: ${look.name}`}>
           {look.from === "preset" ? <Palette size={10} /> : <Sparkles size={10} />}
         </span>
       )}

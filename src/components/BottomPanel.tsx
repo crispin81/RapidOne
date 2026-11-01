@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Building2, Ruler } from "lucide-react";
+import { Building2, Pipette, Ruler } from "lucide-react";
 import { PANEL_ORDER, SLIDER_GROUPS, type Adjustments, type SliderGroup } from "../adjustments";
 import type { Curves } from "../curves";
 import type { Grade } from "../grade";
@@ -12,6 +12,7 @@ import ColourMixer from "./ColourMixer";
 import GradeWheels from "./GradeWheels";
 import VSlider from "./VSlider";
 import { CircleDashed } from "lucide-react";
+import DenoiseIcon from "./DenoiseIcon";
 import type { SliderDef } from "../adjustments";
 
 
@@ -32,7 +33,7 @@ const LIGHTROOM_NAMES: Record<string, string> = {
 function PanelTitle({ name }: { name: string }) {
   const lightroom = LIGHTROOM_NAMES[name];
   return (
-    <h3 className="panel__title" title={`${lightroom ? `${name} (Lightroom: ${lightroom})` : name}\nClick, or Shift+${name[0]}, selects it; Esc, Shift+${name[0]} or a click on this title again leaves`}>
+    <h3 className="panel__title" title={`${lightroom ? `${name} (also called ${lightroom})` : name}\nClick, or Shift+${name[0]}, selects it; Esc, Shift+${name[0]} or a click on this title again leaves`}>
       {/* Gold, underlined first letter = the group's key. */}
       <span className="panel__key">{name[0]}</span>
       {name.slice(1)}
@@ -84,6 +85,9 @@ interface Props {
   onPicks: (p: Partial<PanelPicks>) => void;
   /** A mask tool is open: the sliders masks have act on the picked mask (`values` holds its
    *  numbers for them), the others are greyed out; the tick boxes are Show mask and Invert. */
+  /** The white balance picker is waiting for a click on the photo; the W/B heading's button starts or stops it. */
+  wbPicking?: boolean;
+  onPickWhiteBalance?: () => void;
   /** A right-click on a group (its name): its menu (Reset its settings). */
   onGroupMenu?: (name: string, x: number, y: number) => void;
   mask?: {
@@ -129,6 +133,8 @@ export default function BottomPanel({
   onPicks,
   mask,
   onGroupMenu,
+  wbPicking = false,
+  onPickWhiteBalance,
 }: Props) {
 
 
@@ -253,6 +259,25 @@ export default function BottomPanel({
                   <Building2 size={12} />
                 </button>
               </div>
+            ) : group.name === "W/B" && onPickWhiteBalance ? (
+              // Lightroom's White Balance Selector: click it, then something neutral on the photo.
+              <div className="panel__title-row">
+                <PanelTitle name={group.name} />
+                <button
+                  type="button"
+                  className={`mini-btn${wbPicking ? " mini-btn--on" : ""}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onPickWhiteBalance();
+                  }}
+                  disabled={Boolean(mask)}
+                  title={wbPicking ? "Click something neutral grey or white on the photo (Esc to cancel)" : "White balance picker: click something on the photo that should be neutral"}
+                  aria-label="White balance picker"
+                  aria-pressed={wbPicking}
+                >
+                  <Pipette size={12} />
+                </button>
+              </div>
             ) : group.name === "Effects" ? (
               // The legacy (Lightroom) vignette: its switch beside the title puts its sliders in the group
               // in place of the adaptive vignette's (lit while the photo has a legacy vignette).
@@ -265,11 +290,30 @@ export default function BottomPanel({
                     e.stopPropagation();
                     onPicks({ legacyVignette: !picks.legacyVignette });
                   }}
-                  title={picks.legacyVignette ? "Back to the adaptive vignette's slider" : "Legacy vignette (Lightroom's): its Amount, Midpoint, Roundness, Feather and Highlights here"}
+                  title={picks.legacyVignette ? "Back to the adaptive vignette's slider" : "Legacy vignette: its Amount, Midpoint, Roundness, Feather and Highlights here"}
                   aria-label="Legacy vignette"
                   aria-pressed={Boolean(picks.legacyVignette)}
                 >
                   <CircleDashed size={12} />
+                </button>
+              </div>
+            ) : group.name === "Sharpen" ? (
+              // Colour noise reduction: its switch beside the title adds the slider to the group. It's on
+              // for every RAW whether shown or not, so the ring only marks a value other than the photo's default.
+              <div className="panel__title-row">
+                <PanelTitle name={group.name} />
+                <button
+                  type="button"
+                  className={`mini-btn${picks.legacyNoise ? " mini-btn--on" : ""}${values.colourNoise !== neutrals.colourNoise ? " mini-btn--used" : ""}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onPicks({ legacyNoise: !picks.legacyNoise });
+                  }}
+                  title={picks.legacyNoise ? "Hide Colour noise reduction" : "Legacy noise: colour noise reduction, 25 on every RAW, smooths colour speckle only"}
+                  aria-label="Legacy noise"
+                  aria-pressed={Boolean(picks.legacyNoise)}
+                >
+                  <DenoiseIcon size={12} colour />
                 </button>
               </div>
             ) : (
@@ -288,7 +332,9 @@ export default function BottomPanel({
               ) : (
                 (group.name === "Effects" && picks.legacyVignette
                   ? [...GROUPS_BY_NAME["Legacy vignette"].sliders, ...group.sliders.filter((d) => d.id !== "adaptiveVignette")]
-                  : group.sliders
+                  : group.name === "Sharpen" && picks.legacyNoise
+                    ? [...group.sliders, ...GROUPS_BY_NAME["Legacy noise"].sliders]
+                    : group.sliders
                 ).map((def) => {
                   // A mask tool open: the mask's version of the slider, or greyed out.
                   const md = mask ? (mask.picked ? mask.defOf(def) : null) : def;

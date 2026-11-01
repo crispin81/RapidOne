@@ -16,6 +16,14 @@ export interface SliderDef {
   modifier: Modifier;
   min: number;
   max: number;
+  /**
+   * The values it can take, when narrower than the track (`min`..`max`): the track then runs past
+   * them, blocked, so it lines up with its neighbours (Noise beside Sharpen, which goes below 0).
+   */
+  lowest?: number;
+  highest?: number;
+  /** Track positions per unit of value (default 1): Noise's 0..100 spread over Sharpen's 0..150 half. */
+  stretch?: number;
   /** Change per held-key + ↑/↓ press and per scroll-wheel notch: the small, everyday step. */
   step: number;
   /** Change per held-key + Ctrl+↑/↓ press: the big jump. Values snap to multiples of it. */
@@ -49,7 +57,7 @@ function s(
   range: Partial<
     Pick<
       SliderDef,
-      "min" | "max" | "step" | "coarseStep" | "decimals" | "neutral" | "trackGradient" | "scale" | "tooltip"
+      "min" | "max" | "lowest" | "highest" | "stretch" | "step" | "coarseStep" | "decimals" | "neutral" | "trackGradient" | "scale" | "tooltip"
     >
   > = {},
 ): SliderDef {
@@ -128,8 +136,12 @@ export const SLIDER_GROUPS: SliderGroup[] = [
     // with Definition (D).
     name: "Sharpen",
     sliders: [
-      s("sharpen", "Sharpen", "S", "alt", { min: 0, max: 150 }),
-      s("noise", "Noise", "N", "none", { min: 0, max: 100 }),
+      // Below 0 it softens (Lightroom's mask Sharpness does; its global Amount stops at 0).
+      // -150..150 so 0 sits in the middle (Chris, 1 Nov); Lightroom's 0..150 unchanged.
+      s("sharpen", "Sharpen", "S", "alt", { min: -150, max: 150 }),
+      // On Sharpen's track so the two look even, 0 centred and blocked below it; its 0..100 spread over
+      // the whole right half (100 at the top, no stop there) (Chris, 1 Nov).
+      s("noise", "Noise", "N", "none", { min: -150, max: 150, lowest: 0, highest: 100, stretch: 1.5 }),
     ],
   },
   {
@@ -151,6 +163,12 @@ export const SLIDER_GROUPS: SliderGroup[] = [
     sliders: [s("adaptiveVignette", "Adaptive vignette", "V", "shift", { tooltip: "Adaptive vignette: darkens around the subject" }), s("grain", "Grain", "G", "none", { min: 0, max: 100 })],
   },
   {
+    // Lightroom's Color noise reduction. Set in the Sharpen panel's switch ("Legacy noise"), not as a
+    // group of its own (not in BottomPanel's PANEL_ORDER). 25 on a RAW, 0 on anything else (`defaultsFor`).
+    name: "Legacy noise",
+    sliders: [s("colourNoise", "Colour", "", "none", { min: 0, max: 100, neutral: 25, tooltip: "Colour noise reduction: smooths colour speckle, brightness untouched" })],
+  },
+  {
     // The legacy (Lightroom) vignette: its amount and shape. Set in the
     // Effects panel's pop-up (or from a Lightroom edit), not as a group of
     // its own (not in BottomPanel's PANEL_ORDER).
@@ -162,6 +180,20 @@ export const SLIDER_GROUPS: SliderGroup[] = [
       s("vignetteRoundness", "Roundness", "", "none", { min: -100, max: 100 }),
       s("vignetteFeather", "Feather", "", "none", { min: 0, max: 100, neutral: 50 }),
       s("vignetteHighlights", "Highlights", "", "none", { min: 0, max: 100 }),
+    ],
+  },
+  {
+    // Lens Corrections' Defringe (Lightroom's numbers): Amount 0..20 per colour and its hue
+    // range (0..100 along that colour's band). Set in the Lens menu, not as a group of its own
+    // (not in BottomPanel's PANEL_ORDER).
+    name: "Defringe",
+    sliders: [
+      s("defringePurple", "Purple amount", "", "none", { min: 0, max: 20 }),
+      s("defringePurpleHueLo", "Purple hue from", "", "none", { min: 0, max: 100, neutral: 30 }),
+      s("defringePurpleHueHi", "Purple hue to", "", "none", { min: 0, max: 100, neutral: 70 }),
+      s("defringeGreen", "Green amount", "", "none", { min: 0, max: 20 }),
+      s("defringeGreenHueLo", "Green hue from", "", "none", { min: 0, max: 100, neutral: 40 }),
+      s("defringeGreenHueHi", "Green hue to", "", "none", { min: 0, max: 100, neutral: 60 }),
     ],
   },
   {
@@ -238,10 +270,15 @@ export const ALL_SLIDERS: SliderDef[] = SLIDER_GROUPS.flatMap((g) => g.sliders);
 /** Neutral value for each slider. */
 export const DEFAULTS: Record<string, number> = Object.fromEntries(ALL_SLIDERS.map((d) => [d.id, d.neutral]));
 
+/** A photo's starting values: Colour noise reduction is on for a RAW, off for what's already been developed (Lightroom's defaults). */
+export function defaultsFor(path: string | null | undefined): Record<string, number> {
+  return /\.(jpe?g|tiff?|png|webp)$/i.test(path ?? "") ? { ...DEFAULTS, colourNoise: 0 } : DEFAULTS;
+}
+
 export type Adjustments = Record<string, number>;
 
 export function clampToSlider(def: SliderDef, value: number): number {
-  const clamped = Math.min(def.max, Math.max(def.min, value));
+  const clamped = Math.min(def.highest ?? def.max, Math.max(def.lowest ?? def.min, value));
   // Round to the slider's precision so repeated nudges never drift (0.1 + 0.2 ...).
   const factor = 10 ** Math.max(def.decimals, 2);
   return Math.round(clamped * factor) / factor;
@@ -249,7 +286,7 @@ export function clampToSlider(def: SliderDef, value: number): number {
 
 export function formatValue(def: SliderDef, value: number): string {
   const text = value.toFixed(def.decimals);
-  return value > 0 && def.min < 0 ? `+${text}` : text;
+  return value > 0 && (def.lowest ?? def.min) < 0 ? `+${text}` : text;
 }
 
 /**
@@ -311,7 +348,7 @@ export function toFraction(def: SliderDef, value: number): number {
     const f = (1 / def.min - 1 / value) / (1 / def.min - 1 / def.max);
     return Math.min(1, Math.max(0, f));
   }
-  return Math.min(1, Math.max(0, (value - def.min) / (def.max - def.min)));
+  return Math.min(1, Math.max(0, (value * (def.stretch ?? 1) - def.min) / (def.max - def.min)));
 }
 
 /** The value at a position along the track (0..1). */
@@ -320,5 +357,5 @@ export function fromFraction(def: SliderDef, f: number): number {
   if (def.scale === "mired") {
     return 1 / (1 / def.min - t * (1 / def.min - 1 / def.max));
   }
-  return def.min + t * (def.max - def.min);
+  return (def.min + t * (def.max - def.min)) / (def.stretch ?? 1);
 }

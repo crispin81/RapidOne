@@ -366,6 +366,20 @@ pub struct RenderSettings {
     pub lens_correct: f32,
     #[serde(default)]
     pub lens_id: f64,
+    /// Defringe (`defringe.rs`), Lightroom's numbers: Amount 0..20 per colour, hue
+    /// range 0..100 along that colour's band. Applied with the lens corrections.
+    #[serde(default)]
+    pub defringe_purple: f32,
+    #[serde(default = "purple_lo")]
+    pub defringe_purple_hue_lo: f32,
+    #[serde(default = "purple_hi")]
+    pub defringe_purple_hue_hi: f32,
+    #[serde(default)]
+    pub defringe_green: f32,
+    #[serde(default = "green_lo")]
+    pub defringe_green_hue_lo: f32,
+    #[serde(default = "green_hi")]
+    pub defringe_green_hue_hi: f32,
     /// Crop, straighten and quarter turns, on the finished picture (`crop.rs`).
     #[serde(default)]
     pub crop: crate::crop::Crop,
@@ -375,6 +389,19 @@ pub struct RenderSettings {
     /// Fine tuning, Mixer, Curves, Grade and Vignette (see `tools`).
     #[serde(flatten)]
     pub tools: crate::tools::ToolSettings,
+}
+
+fn purple_lo() -> f32 {
+    crate::defringe::PURPLE_LO
+}
+fn purple_hi() -> f32 {
+    crate::defringe::PURPLE_HI
+}
+fn green_lo() -> f32 {
+    crate::defringe::GREEN_LO
+}
+fn green_hi() -> f32 {
+    crate::defringe::GREEN_HI
 }
 
 /// RapidOne's own profiles. Each is our own tone curve and colour character,
@@ -991,14 +1018,14 @@ pub struct Tuning {
     /// A master curve on the shown sRGB values (each channel), as an Affinity /
     /// Photoshop RGB curve: through (0,0), (x1,y1), (x2,y2), (1,1), smooth and
     /// monotone. All zero = off. Chris's subtle S, 2026-10-14: (0.248, 0.22),
-    /// (0.739, 0.765).
+    /// (0.739, 0.765); halved 2026-11-01: (0.248, 0.234), (0.739, 0.752).
     pub display_curve: [f32; 4],
     /// After it, a curve on the shown blue channel only, through (0,0), (x,y),
     /// (1,1) (zero = off). Chris's, 2026-10-14: (0.241, 0.263), cooling the warm
     /// indoor shadows and mid-tones.
     pub display_blue_curve: [f32; 2],
     /// Added to the Mixer's Yellow Saturation on every render (as if the slider
-    /// were moved this much on top of the edit). Chris, 2026-10-14: +10.
+    /// were moved this much on top of the edit). Chris, 2026-10-14: +10; halved to +5, 2026-11-01.
     pub yellow_sat_extra: f32,
     /// Which half of `blue_s`: 0 = both (the S), 1 = the dark half only (blue
     /// lowered below the middle), 2 = the bright half only, 3 = only where blue
@@ -1346,9 +1373,11 @@ impl Tuning {
             shadows_plus_model: [0.112, 0.856, 0.939, 0.0, 2.702, 0.437, -0.006, 0.982, -0.259, 0.170, -0.053],
             shadows_minus_model: [0.071, 1.038, 1.014, 0.0, 3.501, 0.882, 0.0, 0.0, 0.860, 0.002, 0.0],
             shadows_highlights_link: 0.6,
-            display_curve: [0.248, 0.22, 0.739, 0.765],
+            // Chris's S at half strength (2026-11-01): each point halfway back to the straight line.
+            display_curve: [0.248, 0.234, 0.739, 0.752],
             display_blue_curve: [0.241, 0.263],
-            yellow_sat_extra: 10.0,
+            // Halved 2026-11-01 (was +10).
+            yellow_sat_extra: 5.0,
             ..Tuning::default()
         }
     }

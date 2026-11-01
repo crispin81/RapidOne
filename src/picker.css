@@ -1,0 +1,178 @@
+/* The pickers (White balance, Defringe): the click layer over the photo and the Defringe
+   controls in the Lens menu. Scoped by class names, nothing page-wide. */
+
+.pickoverlay {
+  position: fixed;
+  z-index: 1000;
+  cursor: default;
+}
+
+.pickoverlay--on {
+  /* An eyedropper (Lucide's Pipette, outlined so it shows on light and dark), its tip the hot spot. */
+  cursor: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke-linecap='round' stroke-linejoin='round'><g stroke='%23000' stroke-width='4'><path d='m2 22 1-1h3l9-9'/><path d='M3 21v-3l9-9'/><path d='m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3l.4.4Z'/></g><g stroke='%23fff' stroke-width='2'><path d='m2 22 1-1h3l9-9'/><path d='M3 21v-3l9-9'/><path d='m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3l.4.4Z'/></g></svg>") 2 22, crosshair;
+}
+
+/* White balance: R G B (%) under the eyedropper, beside it. */
+.pickoverlay__rgb {
+  position: absolute;
+  display: flex;
+  gap: 8px;
+  padding: 3px 7px;
+  border: 1px solid rgba(62, 230, 255, 0.45);
+  border-radius: 3px;
+  background: rgba(6, 12, 20, 0.88);
+  color: #e6f6fa;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* The pickers' messages, floating over the photo (not in the page's flow, so nothing moves). */
+.pick-toast {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  padding: 6px 14px;
+  border: 1px solid rgba(62, 230, 255, 0.55);
+  border-radius: 4px;
+  background: rgba(6, 12, 20, 0.92);
+  color: #e6f6fa;
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.pickoverlay__hint {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border: 1px solid rgba(62, 230, 255, 0.55);
+  border-radius: 4px;
+  background: rgba(6, 12, 20, 0.88);
+  color: #e6f6fa;
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.pickoverlay__hint svg {
+  color: #3ee6ff;
+}
+
+.pickoverlay__esc {
+  margin-left: 6px;
+  opacity: 0.6;
+}
+
+/* Defringe, in the Lens menu. */
+.defringe {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  margin-top: 4px;
+  border-top: 1px solid rgba(62, 230, 255, 0.18);
+}
+
+.defringe__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #e6f6fa;
+}
+
+.defringe__row {
+  display: grid;
+  grid-template-columns: 92px 1fr 40px;
+  white-space: nowrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: #9fb4bd;
+}
+
+.defringe__value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #e6f6fa;
+}
+
+/* The hue range: the colour band with two handles. */
+.huerange {
+  position: relative;
+  height: 14px;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.huerange__band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 4px;
+  height: 6px;
+  border-radius: 3px;
+}
+
+.huerange__shade {
+  position: absolute;
+  top: 4px;
+  height: 6px;
+  background: rgba(6, 12, 20, 0.7);
+  pointer-events: none;
+}
+
+.huerange__handle {
+  position: absolute;
+  top: 0;
+  width: 8px;
+  height: 14px;
+  margin-left: -4px;
+  border: 1px solid #0a1016;
+  border-radius: 2px;
+  background: #fff;
+  pointer-events: none;
+}
+
+.huerange:hover .huerange__handle {
+  background: rgb(255, 122, 26);
+}
+
+.mini-btn.pick-btn--on,
+.defringe__pick.pick-btn--on {
+  color: #0a1016;
+  background: #3ee6ff;
+}
+
+.defringe__pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid rgba(62, 230, 255, 0.45);
+  border-radius: 3px;
+  background: transparent;
+  color: #3ee6ff;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.defringe__pick:hover:not(:disabled) {
+  border-color: rgb(255, 122, 26);
+  color: rgb(255, 122, 26);
+}
+
+.defringe__pick.pick-btn--on:hover {
+  color: #0a1016;
+  background: rgb(255, 122, 26);
+}
