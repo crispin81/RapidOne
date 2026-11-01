@@ -53,9 +53,6 @@ podman run --rm \
     # prebuilt library (ort-sys skips the download then, and the link fails).
     printf "[net]\noffline = true\n" > /root/.cargo/config.toml
     [ -x /root/.cargo/bin/cargo ] || curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --no-modify-path
-    # The patched AppImage GTK hook: native Wayland, dark dialogs, safe drawing.
-    cp .github/appimage/linuxdeploy-plugin-gtk.sh /root/.cache/tauri/linuxdeploy-plugin-gtk.sh
-    chmod +x /root/.cache/tauri/linuxdeploy-plugin-gtk.sh
     # ONNX Runtime'"'"'s WebGPU library (libwebgpu_dawn.so, AI denoise on the graphics card) is a
     # file of its own the app loads from beside itself ($ORIGIN) or, installed from the .deb,
     # from /usr/lib/RapidOne. Built first, then the library put where packaging finds it.
@@ -64,6 +61,8 @@ podman run --rm \
     mkdir -p src-tauri/linux-lib
     cp -L release/.cache/target/release/libwebgpu_dawn.so src-tauri/linux-lib/
     LD_LIBRARY_PATH=/src/release/.cache/target/release npx tauri bundle --verbose --bundles appimage,deb --config src-tauri/tauri.release.conf.json
+    # Native Wayland, dark dialogs, safe drawing, in the AppImage'"'"'s launch hook (fails if it can'"'"'t).
+    scripts/patch-appimage-hook.sh
     cp release/.cache/target/release/bundle/appimage/*.AppImage release/.cache/target/release/bundle/deb/*.deb release/linux/
   '
 ls -lh release/linux

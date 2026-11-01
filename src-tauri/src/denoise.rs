@@ -205,6 +205,33 @@ pub fn encode(scene: &SceneImage) -> (Vec<[f32; 3]>, f32) {
 /// installed. The model sees a display-like picture (brightness scaled so the
 /// 99.5th percentile is white, then gamma 2.2); only the change it makes is
 /// carried back, so highlights above that white are kept as they were.
+/// `scene`, with the last results kept by content: a zoomed-in part is a new Scene each render but
+/// usually the same pixels while a slider moves, and the model takes a second or more on it (1 Nov).
+/// No lock is held while the model runs (as `colournoise::for_scene`).
+pub fn kept(img: &SceneImage) -> Option<std::sync::Arc<SceneImage>> {
+    type Recent = Vec<(u64, std::sync::Arc<SceneImage>)>;
+    static RECENT: Mutex<Recent> = Mutex::new(Vec::new());
+    const KEPT: usize = 2;
+    // Bigger than this (a whole photo for export) isn't held here as well as on its Scene.
+    const MAX_PIXELS: usize = 16_000_000;
+    if img.px.len() > MAX_PIXELS {
+        return scene(img).map(std::sync::Arc::new);
+    }
+    let key = crate::defringe::fingerprint(img);
+    if let Some((_, out)) = RECENT.lock().unwrap_or_else(|e| e.into_inner()).iter().find(|(k, _)| *k == key) {
+        return Some(out.clone());
+    }
+    let out = std::sync::Arc::new(scene(img)?);
+    let mut recent = RECENT.lock().unwrap_or_else(|e| e.into_inner());
+    if !recent.iter().any(|(k, _)| *k == key) {
+        recent.push((key, out.clone()));
+        if recent.len() > KEPT {
+            recent.remove(0);
+        }
+    }
+    Some(out)
+}
+
 pub fn scene(scene: &SceneImage) -> Option<SceneImage> {
     let (encoded, white) = encode(scene);
     let enc = |v: f32| (v / white).max(0.0).powf(1.0 / 2.2);

@@ -32,7 +32,11 @@ fn apply_linux_webkit_workarounds() {
             ("WEBKIT_DISABLE_DMABUF_RENDERER", "1"),
             ("WEBKIT_DISABLE_COMPOSITING_MODE", "1"),
         ]);
-    } else if nvidia {
+    } else {
+        // Native Wayland (correct fractional scaling), X11 where there's none.
+        settings.push(("GDK_BACKEND", "wayland,x11"));
+    }
+    if !safe && nvidia {
         settings.push(("WEBKIT_DMABUF_RENDERER_FORCE_SHM", "1"));
         // Older WebKitGTK (2.52, Ubuntu 24.04's, and the AppImage's) turns its DMA-BUF renderer off
         // for NVIDIA's driver and falls back to painting everything on the web process's main thread

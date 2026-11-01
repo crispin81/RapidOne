@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import "./App.css";
 import "./moduleTweaks.css";
@@ -320,12 +320,12 @@ export default function App() {
   // under its see-through bar); the viewer keeps the photo above it.
   const dockRef = useRef<HTMLDivElement | null>(null);
   const [dockHeight, setDockHeight] = useState(0);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = dockRef.current;
-    if (!el) {
-      setDockHeight(0);
-      return;
-    }
+    // None (another tab): the last height stands, as coming back starts from it. Only read with the panel up.
+    if (!el) return;
+    // Before the first paint too: the viewer keeps the photo above it, so a late height moved the frame.
+    setDockHeight(el.offsetHeight);
     const ro = new ResizeObserver(() => setDockHeight(el.offsetHeight));
     ro.observe(el);
     return () => ro.disconnect();

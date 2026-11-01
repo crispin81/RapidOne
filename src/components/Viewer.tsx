@@ -1,5 +1,6 @@
+import { sameShape } from "../sameShape";
 import HSlider from "./HSlider";
-import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { Adjustments } from "../adjustments";
 import { channelFunction, CURVE_CHANNELS, DEFAULT_CURVES, isIdentity, type Curves } from "../curves";
@@ -44,6 +45,13 @@ const sameRect = (a: readonly number[], b: readonly number[]) => a.every((v, i) 
 // Also through zoom steps (any zoom, same settings): the last patch, scaled, is still sharper than the
 // stretched picture under it, so zooming quickly no longer drops to low resolution and back (1 Nov).
 const samePan = (a: { key: string; z?: number }, b: { key: string; z?: number }) => a.z != null && b.z != null && a.key === b.key;
+/** `outer` takes in all of `inner`, so `inner` never shows round it. */
+const coversRect = (outer: readonly number[], inner: readonly number[]) =>
+  outer[0] <= inner[0] + 1e-4 && outer[1] <= inner[1] + 1e-4 && outer[2] >= inner[2] - 1e-4 && outer[3] >= inner[3] - 1e-4;
+/** The viewer's last size, which outlives it. */
+const keptBox = { current: { w: 1600, h: 900, x: 0, y: 0 } };
+/** The last photo's frame shape, which outlives the viewer. */
+const keptAspect: { path: string | null; aspect: number } = { path: null, aspect: 3 / 2 };
 /** Windows' WebView2 (Chromium's engine): it skips painting fully transparent layers. */
 const CHROMIUM = /Edg\//.test(navigator.userAgent);
 function isMouseWheel(e: WheelEvent, now: number, touchpadUntil: number): boolean {
@@ -359,14 +367,32 @@ export default function Viewer({
   // shape is the last known one while a new photo's picture is on its way.
   const mainRef = useRef<HTMLDivElement>(null);
   // x, y: where the viewer sits in the window, for putting the photo's edges on whole screen pixels.
-  const [box, setBox] = useState({ w: 1600, h: 900, x: 0, y: 0 });
+  const [box, setBox] = useState(keptBox.current);
+  // No easing until placed: Edit is built afresh on coming back from another tab, and the frame's 0.3 s
+  // move eased from its first measure (measured: 1073x840 to 1084x723, the photo stretched by 17%).
+  const [placedOnce, setPlacedOnce] = useState(false);
   useEffect(() => {
+    let second = 0;
+    const first = requestAnimationFrame(() => {
+      second = requestAnimationFrame(() => setPlacedOnce(true));
+    });
+    return () => {
+      cancelAnimationFrame(first);
+      cancelAnimationFrame(second);
+    };
+  }, []);
+  // Measured before the first paint: Edit is built afresh on coming back from another tab, and a frame
+  // placed by the starting size was a different shape from the real box, the photo stretched for a moment.
+  useLayoutEffect(() => {
     const el = mainRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => {
+    const measure = () => {
       const r = el.getBoundingClientRect();
-      setBox({ w: el.clientWidth || 1, h: el.clientHeight || 1, x: r.left, y: r.top });
-    });
+      keptBox.current = { w: el.clientWidth || 1, h: el.clientHeight || 1, x: r.left, y: r.top };
+      setBox(keptBox.current);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
@@ -397,9 +423,13 @@ export default function Viewer({
       mounted.current = false;
     };
   }, []);
-  const [aspect, setAspect] = useState(3 / 2);
+  // The frame's shape, remembered across Edit being built afresh (coming back from another tab).
+  // The corridor rushes past on a new photo, not on coming back to the one it was on.
+  const backToPhoto = useRef(keptAspect.path != null && keptAspect.path === photo?.path);
+  if (backToPhoto.current && keptAspect.path !== photo?.path) backToPhoto.current = false;
+  const [aspect, setAspect] = useState(() => (keptAspect.path === photo?.path ? keptAspect.aspect : 3 / 2));
   // The photo the frame's shape was last taken from.
-  const aspectPath = useRef<string | null>(null);
+  const aspectPath = useRef<string | null>(keptAspect.path === photo?.path ? keptAspect.path : null);
   useEffect(() => {
     if (!target) return;
     if (onScreen?.src === target.src) {
@@ -436,7 +466,12 @@ export default function Viewer({
           const next = im.naturalWidth / im.naturalHeight;
           const samePhoto = aspectPath.current === photo?.path;
           aspectPath.current = photo?.path ?? null;
-          setAspect((prev) => (samePhoto && Math.abs(next - prev) / prev < 0.005 ? prev : next));
+          setAspect((prev) => {
+            const shape = samePhoto && Math.abs(next - prev) / prev < 0.005 ? prev : next;
+            keptAspect.path = aspectPath.current;
+            keptAspect.aspect = shape;
+            return shape;
+          });
         }
       });
     // target is rebuilt every render; these are what it is.
@@ -839,15 +874,18 @@ export default function Viewer({
   if (interactive) fitStaleOk.current = false;
   else if (detailKey !== lastFitKey.current) fitStaleOk.current = photoOfKey(lastFitKey.current) === photoOfKey(detailKey);
   lastFitKey.current = detailKey;
+  // A kept Fit render only while it has the frame's shape: after a crop or a turn the frame takes the new
+  // shape as the new picture goes up, and the old render filled it, stretched, until its successor landed.
+  const fitSameShape = fitDetail != null && sameShape(fitDetail, fitPx);
   const fitStale =
     // Not held to fitWanted: straight after a change the preview is marked pending while it re-renders,
     // which hid this too and showed the soft stand-in (still glitching on a pick, 1 Nov).
-    fitStaleOk.current && !placed && !interactive && !comparing && !cropping && !clipOutline && fitDetail && fitDetail.key !== detailKey && photoOfKey(fitDetail.key) === photoOfKey(detailKey) ? fitDetail : null;
+    fitStaleOk.current && !placed && !interactive && !comparing && !cropping && !clipOutline && fitSameShape && fitDetail && fitDetail.key !== detailKey && photoOfKey(fitDetail.key) === photoOfKey(detailKey) ? fitDetail : null;
   // Zoomed in: the Fit render under the detail instead of the 2400 px preview; after a one-off change,
   // the last one until its successor lands (as at Fit).
   const zoomBase =
     fitDetail &&
-    (fitDetail.key === detailKey || (fitStaleOk.current && !interactive && photoOfKey(fitDetail.key) === photoOfKey(detailKey))) &&
+    (fitDetail.key === detailKey || (fitStaleOk.current && !interactive && fitSameShape && photoOfKey(fitDetail.key) === photoOfKey(detailKey))) &&
     onScreen?.engine &&
     !wholeOfCropped(onScreen.uncropped)
       ? fitDetail.src
@@ -889,7 +927,8 @@ export default function Viewer({
       wanted.current = null;
       return;
     }
-    const k = interactive ? dragScale.current.scale : 1;
+    // On a high-density screen a drag never goes below one render pixel per CSS pixel (1 Nov).
+    const k = interactive ? (dpr > 1 ? Math.max(dragScale.current.scale, 1 / dpr) : dragScale.current.scale) : 1;
     // Once settled, a margin round the part on screen (a quarter of the view each side, within the photo):
     // a pan then moves onto sharp pixels, rather than the stretched preview, blocky at 100% (31 Oct),
     // until the next render lands. Not while a slider moves (every frame counts there).
@@ -930,6 +969,11 @@ export default function Viewer({
     onDetailActive?.(needDetail);
   }, [needDetail, onDetailActive]);
   const samePhoto = (k: string) => k.split("")[0] === detailKey.split("")[0];
+  // A slider let go while zoomed in: the drag's last patch stays until the settled one lands, rather than
+  // the stretched preview showing between them (the slower the render, the longer it showed).
+  const settlingDrag = useRef(false);
+  if (interactive) settlingDrag.current = true;
+  else if (!needDetail || (detail && detail.key === detailKey && detail.z != null)) settlingDrag.current = false;
   const detailShown =
     // The latest real render of this photo stays up until the next replaces
     // it: never an approximation, so nothing jumps when the newest lands.
@@ -945,7 +989,7 @@ export default function Viewer({
     placed &&
     needDetail &&
     samePhoto(detail.key) &&
-    (interactive || detail.key === detailKey || (fitStaleOk.current && detail.z != null && detail.z === zoom?.z))
+    (interactive || detail.key === detailKey || settlingDrag.current || (fitStaleOk.current && detail.z != null && detail.z === zoom?.z))
       ? detail
       : null;
   type Patch = { src: string; rect: [number, number, number, number]; key: string; z?: number };
@@ -1020,13 +1064,13 @@ export default function Viewer({
         ) : (
           <>
             {/* The corridor from the home screen, behind the photo; it rushes past when a new photo arrives. */}
-            <svg key={`corridor-${photo.path}`} className={`viewer__corridor${fullFrame || !surround || zoom ? " viewer__corridor--hidden" : ""}`}
+            <svg key={`corridor-${photo.path}`} className={`viewer__corridor${backToPhoto.current ? " viewer__corridor--still" : ""}${fullFrame || !surround || zoom ? " viewer__corridor--hidden" : ""}`}
               style={corridorFalloff(shownBox)} viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
               <path d={corridorPath(shownBox)} vectorEffect="non-scaling-stroke" />
             </svg>
             {/* The photo in the corridor's closest frame, flying forward from the far end on a new photo. */}
             <div
-              className={`viewer__frame${fullFrame ? " viewer__frame--full" : ""}${surround ? "" : " viewer__frame--plain"}${gliding ? " viewer__frame--glide" : ""}`}
+              className={`viewer__frame${placedOnce ? "" : " viewer__frame--placing"}${fullFrame ? " viewer__frame--full" : ""}${surround ? "" : " viewer__frame--plain"}${gliding ? " viewer__frame--glide" : ""}`}
               style={{
                 left: `${photoBox.l}%`,
                 top: `${photoBox.t}%`,
@@ -1185,7 +1229,7 @@ export default function Viewer({
                     The previous patch stays under the new one only where they cover the same part (the
                     new one fading in over it): from another zoom or place it stuck out round the new
                     one, an odd square, at an older exposure after a change (24 Oct). */}
-                {underDetail.current && placed && !comparing && detailShown && (sameRect(underDetail.current.rect, detailShown.rect) || samePan(underDetail.current, detailShown)) && (
+                {underDetail.current && placed && !comparing && detailShown && (sameRect(underDetail.current.rect, detailShown.rect) || samePan(underDetail.current, detailShown) || interactive || coversRect(detailShown.rect, underDetail.current.rect)) && (
                   <img
                     className="viewer__detail"
                     src={underDetail.current.src}

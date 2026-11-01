@@ -29,8 +29,8 @@ fn write(path: &Path, bytes: &[u8]) -> Result<(), String> {
 
 /// The engine's built-in look (`Tuning::adobe`'s display curves and the like): raised whenever it
 /// changes, so pictures cached with the old one are rendered again rather than shown (their settings
-/// key, the app's, doesn't change with the engine). 1: the S curve halved; 2: Yellow +10 -> +5 (2026-11-01). 3: Colour noise reduction; 4, 5: its strength and method; 6: it follows edges, and sharpening keeps colour; 7: sharpening refitted, 2026-11-01.
-const ENGINE_LOOK: u32 = 7;
+/// key, the app's, doesn't change with the engine). 1: the S curve halved; 2: Yellow +10 -> +5 (2026-11-01). 8: one clipped channel keeps its colour (2026-11-01). 3: Colour noise reduction; 4, 5: its strength and method; 6: it follows edges, and sharpening keeps colour; 7: sharpening refitted, 2026-11-01.
+const ENGINE_LOOK: u32 = 8;
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct PreviewMeta {

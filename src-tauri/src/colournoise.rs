@@ -148,8 +148,11 @@ pub fn for_scene(scene: &crate::develop::Scene, amount: f32, scale: f32) -> Opti
     if amount <= 0.0 {
         return None;
     }
-    let mut kept = scene.colour_cleaned.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some((a, img)) = kept.as_ref() {
+    // No lock is held while the filter runs: it waits on rayon's pool, and a pool thread waiting on the
+    // same lock (another render) would hang them all, with every later render stuck behind it. Two
+    // renders may make the same result at once; the waste is harmless.
+    let keep = |img: &Arc<SceneImage>| *scene.colour_cleaned.lock().unwrap_or_else(|e| e.into_inner()) = Some((amount, img.clone()));
+    if let Some((a, img)) = scene.colour_cleaned.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         if *a == amount {
             return Some(img.clone());
         }
@@ -158,23 +161,26 @@ pub fn for_scene(scene: &crate::develop::Scene, amount: f32, scale: f32) -> Opti
     // the last few results are kept by content, or every drag frame would pay for the filter.
     if scene.image.px.len() > RECENT_MAX_PIXELS {
         let img = Arc::new(apply(&scene.image, amount, scale)?);
-        *kept = Some((amount, img.clone()));
+        keep(&img);
         return Some(img);
     }
     let key = (crate::defringe::fingerprint(&scene.image), amount.to_bits(), scale.to_bits());
-    let mut recent = RECENT.lock().unwrap_or_else(|e| e.into_inner());
-    let img = match recent.iter().find(|(k, _)| *k == key) {
-        Some((_, img)) => img.clone(),
+    let found = RECENT.lock().unwrap_or_else(|e| e.into_inner()).iter().find(|(k, _)| *k == key).map(|(_, img)| img.clone());
+    let img = match found {
+        Some(img) => img,
         None => {
             let img = Arc::new(apply(&scene.image, amount, scale)?);
-            recent.push((key, img.clone()));
-            if recent.len() > RECENT_KEPT {
-                recent.remove(0);
+            let mut recent = RECENT.lock().unwrap_or_else(|e| e.into_inner());
+            if !recent.iter().any(|(k, _)| *k == key) {
+                recent.push((key, img.clone()));
+                if recent.len() > RECENT_KEPT {
+                    recent.remove(0);
+                }
             }
             img
         }
     };
-    *kept = Some((amount, img.clone()));
+    keep(&img);
     Some(img)
 }
 

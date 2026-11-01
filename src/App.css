@@ -248,6 +248,16 @@ button.primary {
   pointer-events: none;
 }
 
+/* Room for the Mac's own window buttons, top left, and a Mac's own title bar height: at 28px they sat
+   2px low and filled half the bar. */
+.titlebar--mac {
+  height: 32px;
+}
+
+.titlebar--mac .titlebar__links {
+  left: 78px;
+}
+
 .titlebar__controls {
   display: flex;
   height: 100%;
@@ -758,6 +768,15 @@ button.primary {
 
 .viewer__corridor {
   transition: opacity 0.3s ease;
+}
+
+.viewer__frame.viewer__frame--placing {
+  transition: none;
+  animation: none;
+}
+
+.viewer__corridor--still {
+  animation: none;
 }
 
 .viewer__corridor--hidden {

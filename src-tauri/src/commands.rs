@@ -727,7 +727,7 @@ fn render_image_tone(scene: &crate::develop::Scene, settings: &crate::pipeline::
     let filtered = if noise < 1.0 { crate::colournoise::for_scene(scene, settings.tools.colour_noise, colour_scale) } else { None };
     let start = filtered.as_deref().unwrap_or(&scene.image);
     let cleaned = (noise > 0.0)
-        .then(|| scene.denoised.get_or_init(|| crate::denoise::scene(&scene.image).map(std::sync::Arc::new)).clone())
+        .then(|| scene.denoised.get_or_init(|| crate::denoise::kept(&scene.image)).clone())
         .flatten()
         .map(|d| {
             if noise >= 1.0 {

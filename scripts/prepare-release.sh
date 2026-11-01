@@ -55,6 +55,14 @@ if [[ "$target" == *windows-msvc ]]; then
   mkdir -p src-tauri/windows-lib
   for f in msvcp140.dll msvcp140_1.dll vcruntime140.dll vcruntime140_1.dll; do cp "$crt/$f" src-tauri/windows-lib/; done
   echo "C++ runtime from $crt"
+  # DirectML.dll beside RapidOne.exe too, in both installers: ONNX Runtime needs DirectML 1.8 or newer, and the
+  # copy in Windows 10 and Windows 11 before 22H2 is older, so AI Noise would fall back to the CPU. ort downloads
+  # it into its cache with the ONNX Runtime it builds in.
+  ort_cache="$(cygpath -u "${LOCALAPPDATA:-$USERPROFILE/AppData/Local}")/ort.pyke.io/dfbin/$target"
+  dml="$(ls -t "$ort_cache"/*/DirectML.dll 2>/dev/null | head -1 || true)"
+  [ -n "$dml" ] || { echo "DirectML.dll not found in ort's cache ($ort_cache): run a cargo build first" >&2; exit 1; }
+  cp "$dml" src-tauri/windows-lib/
+  echo "DirectML from $dml"
 fi
 
 echo "Release files staged for $target (RapidRetouch engine from $module)."

@@ -5,7 +5,8 @@
       "windows-lib/msvcp140.dll": "msvcp140.dll",
       "windows-lib/msvcp140_1.dll": "msvcp140_1.dll",
       "windows-lib/vcruntime140.dll": "vcruntime140.dll",
-      "windows-lib/vcruntime140_1.dll": "vcruntime140_1.dll"
+      "windows-lib/vcruntime140_1.dll": "vcruntime140_1.dll",
+      "windows-lib/DirectML.dll": "DirectML.dll"
     },
     "windows": {
       "nsis": {

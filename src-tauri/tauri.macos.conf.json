@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "windows": [
+      {
+        "title": "RapidOne",
+        "width": 1600,
+        "height": 1000,
+        "minWidth": 1100,
+        "minHeight": 700,
+        "decorations": true,
+        "theme": "Dark",
+        "backgroundColor": "#080808",
+        "dragDropEnabled": false,
+        "zoomHotkeysEnabled": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
+      }
+    ]
+  }
+}

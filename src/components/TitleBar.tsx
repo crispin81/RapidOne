@@ -5,6 +5,7 @@ import { Minus, Square, X } from "lucide-react";
 import About from "./About";
 import RenderMenu from "./RenderMenu";
 import { openExternal } from "../openExternal";
+import { IS_MAC } from "../macKeys";
 
 /** Chris's RapidOne tutorials on YouTube (the Learn button). */
 const LEARN_URL = "https://www.youtube.com/playlist?list=PLC5lWfy1MHI8";
@@ -67,7 +68,7 @@ export default function TitleBar({ progress, onCancelRead, statusSlot, handBack,
   const fraction =
     loading?.fraction ?? (loading?.total ? (loading.done ?? 0) / loading.total : null);
   return (
-    <div className="titlebar" data-tauri-drag-region>
+    <div className={`titlebar${IS_MAC ? " titlebar--mac" : ""}`} data-tauri-drag-region>
       {/* About, top left: who made it, and everything each part is built on; Learn: the video tutorials. */}
       <div className="titlebar__links">
         <button type="button" className="titlebar__about" onClick={() => setAbout(true)} title="About RapidOne">
@@ -109,17 +110,20 @@ export default function TitleBar({ progress, onCancelRead, statusSlot, handBack,
       <span className="titlebar__title" data-tauri-drag-region>
         RapidOne{version && ` // V${version}`}
       </span>
-      <div className="titlebar__controls">
-        <button type="button" onClick={() => appWindow.minimize()} title="Minimize">
-          <Minus size={13} />
-        </button>
-        <button type="button" onClick={() => appWindow.toggleMaximize()} title="Maximize">
-          <Square size={11} />
-        </button>
-        <button type="button" className="titlebar__close" onClick={() => appWindow.close()} title="Close">
-          <X size={13} />
-        </button>
-      </div>
+      {/* A Mac has its own three buttons, top left (tauri.macos.conf.json). */}
+      {!IS_MAC && (
+        <div className="titlebar__controls">
+          <button type="button" onClick={() => appWindow.minimize()} title="Minimize">
+            <Minus size={13} />
+          </button>
+          <button type="button" onClick={() => appWindow.toggleMaximize()} title="Maximize">
+            <Square size={11} />
+          </button>
+          <button type="button" className="titlebar__close" onClick={() => appWindow.close()} title="Close">
+            <X size={13} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -57,8 +57,8 @@ pub struct SceneImage {
 /// Turns white-balanced camera RGB into a scene image.
 ///
 /// `clip` is where each channel saturates after white balance (the sensor's
-/// ceiling, 1.0, times that channel's multiplier). Where any channel nears
-/// its ceiling, the true colour is unknown - it was cut off - so the pixel
+/// ceiling, 1.0, times that channel's multiplier). Where two channels near
+/// their ceilings, the true colour is unknown - it was cut off - so the pixel
 /// is blended towards neutral at its brightest channel's level. Without
 /// this, blown skies and lamps turn magenta. Unclipped highlights keep all
 /// their headroom above 1.
@@ -72,7 +72,11 @@ pub fn scene_from_camera(
     let px = cam
         .par_iter()
         .map(|&c| {
-            let fill = (0..3).map(|i| c[i] / clip[i]).fold(0.0f32, f32::max);
+            // The second fullest channel: with only one at its ceiling (a sunset's red), the others still
+            // know the colour, and blending made a hard white patch there (1 Nov).
+            let mut fills: [f32; 3] = std::array::from_fn(|i| c[i] / clip[i]);
+            fills.sort_by(|a, b| b.total_cmp(a));
+            let fill = fills[1];
             // 0 below 92% of the ceiling, easing to 1 at the ceiling.
             let t = ((fill - 0.92) / 0.08).clamp(0.0, 1.0);
             let t = t * t * (3.0 - 2.0 * t);
