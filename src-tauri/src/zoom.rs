@@ -243,6 +243,19 @@ pub fn render_part(
             }
         };
         let frame = crate::pipeline::Frame { x0: ax0 as f32 / k as f32, y0: ay0 as f32 / k as f32, full_w: w as f32 / k as f32, full_h: h as f32 / k as f32 };
+        // A patch copying from where an earlier removal or patch changed the photo reads the photo
+        // with those in (as the whole-photo render does), not the photo as shot: zoomed in, a patch
+        // copied from an erased spot showed the object again (Chris, 12 Nov).
+        let staged: Vec<(usize, std::sync::Arc<SceneImage>)> = covered_sources(&settings.removals)
+            .into_iter()
+            .filter_map(|i| Some((i, with_spots_before(full, settings, lens.as_deref(), i)?)))
+            .collect();
+        let sample = |i: usize, fx: f32, fy: f32| -> [f32; 3] {
+            match staged.iter().find(|(at, _)| *at == i) {
+                Some((_, img)) => crate::commands::bilinear(&img.px, img.width, img.height, fx * img.width as f32 - 0.5, fy * img.height as f32 - 0.5),
+                None => sample(fx, fy),
+            }
+        };
         // With the removals, in the order they were all made (`removal::apply_in_order`).
         if let Some(p) = crate::removal::apply_in_order(&part_image, &settings.removals, Some(&frame), Some(&sample)) {
             part_image = p;
@@ -326,4 +339,99 @@ fn sample(img: &image::RgbImage, x: f32, y: f32) -> image::Rgb<u8> {
         let bot = c[i] + (d[i] - c[i]) * tx;
         (top + (bot - top) * ty).round().clamp(0.0, 255.0) as u8
     }))
+}
+
+/// The starts of the patch runs in `spots` whose sources overlap a spot made before them (a removal's
+/// area or an earlier patch's outline): those must read the photo with the earlier spots in.
+fn covered_sources(spots: &[crate::removal::Spot]) -> Vec<usize> {
+    let bounds = |pts: &mut dyn Iterator<Item = [f32; 2]>| -> Option<[f32; 4]> {
+        pts.fold(None, |b: Option<[f32; 4]>, [x, y]| Some(match b {
+            None => [x, y, x, y],
+            Some([x0, y0, x1, y1]) => [x0.min(x), y0.min(y), x1.max(x), y1.max(y)],
+        }))
+    };
+    let changed = |s: &crate::removal::Spot| -> Option<[f32; 4]> {
+        match (s.removal(), s.patch()) {
+            (Some(r), _) => Some(r.crop),
+            (_, Some(p)) => bounds(&mut p.polygon.iter().copied()),
+            _ => None,
+        }
+    };
+    let overlap = |a: [f32; 4], b: [f32; 4]| a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < spots.len() {
+        let is_patch = spots[i].patch().is_some();
+        let mut j = i;
+        while j < spots.len() && spots[j].patch().is_some() == is_patch {
+            j += 1;
+        }
+        if is_patch && i > 0 {
+            let earlier: Vec<[f32; 4]> = spots[..i].iter().filter_map(changed).collect();
+            let hit = spots[i..j].iter().filter_map(|s| s.patch()).any(|p| {
+                bounds(&mut p.polygon.iter().map(|[x, y]| [x + p.offset[0], y + p.offset[1]]))
+                    .is_some_and(|src| earlier.iter().any(|&e| overlap(src, e)))
+            });
+            if hit {
+                out.push(i);
+            }
+        }
+        i = j;
+    }
+    out
+}
+
+/// The whole photo, lens-corrected as the part is, with `settings.removals[..upto]` in. Kept for
+/// the next pan or zoom on the same photo and spots (it's a full-size render of the removals).
+fn with_spots_before(
+    full: &Scene,
+    settings: &crate::pipeline::RenderSettings,
+    lens: Option<&crate::lens::LensCorrection>,
+    upto: usize,
+) -> Option<std::sync::Arc<SceneImage>> {
+    type Kept = Option<(String, std::sync::Arc<SceneImage>)>;
+    static KEPT: std::sync::Mutex<Kept> = std::sync::Mutex::new(None);
+    let key = format!(
+        "{:p}/{}/{}/{}/{}",
+        full.image.px.as_ptr(),
+        full.image.px.len(),
+        lens.is_some(),
+        settings.lens_id,
+        serde_json::to_string(&settings.removals[..upto]).ok()?
+    );
+    if let Some((k, img)) = KEPT.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        if *k == key {
+            return Some(img.clone());
+        }
+    }
+    let corrected = lens.map(|l| l.apply(&full.image));
+    let base = corrected.as_ref().unwrap_or(&full.image);
+    let img = std::sync::Arc::new(crate::removal::apply_in_order(base, &settings.removals[..upto], None, None).unwrap_or_else(|| base.clone()));
+    *KEPT.lock().unwrap_or_else(|e| e.into_inner()) = Some((key, img.clone()));
+    Some(img)
+}
+
+#[cfg(test)]
+mod staged_tests {
+    use super::covered_sources;
+
+    #[test]
+    fn a_patch_copying_from_an_erased_spot_reads_the_photo_with_it() {
+        // A removal over the middle, then a patch whose source (outline moved by the offset) lands on it.
+        let spots: Vec<crate::removal::Spot> = serde_json::from_str(
+            r#"[{"file":"x.png","crop":[0.4,0.4,0.6,0.6],"area":[0.45,0.45,0.55,0.55],"ev":0},
+                {"kind":"patch","polygon":[[0.1,0.1],[0.2,0.1],[0.2,0.2]],"offset":[0.35,0.35],"mode":"clone"}]"#,
+        )
+        .unwrap();
+        assert_eq!(covered_sources(&spots), vec![1]);
+        // The same patch copying from elsewhere: the photo as it is.
+        let far: Vec<crate::removal::Spot> = serde_json::from_str(
+            r#"[{"file":"x.png","crop":[0.4,0.4,0.6,0.6],"area":[0.45,0.45,0.55,0.55],"ev":0},
+                {"kind":"patch","polygon":[[0.1,0.1],[0.2,0.1],[0.2,0.2]],"offset":[0.0,0.6],"mode":"clone"}]"#,
+        )
+        .unwrap();
+        assert!(covered_sources(&far).is_empty());
+        // A patch first in the list never needs it.
+        assert!(covered_sources(&spots[1..]).is_empty());
+    }
 }

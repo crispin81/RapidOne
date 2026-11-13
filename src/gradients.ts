@@ -32,6 +32,12 @@ export function hasSubject(g: Gradient): boolean {
 export const BRUSH_SIZE = 0.03;
 export const BRUSH_FEATHER = 50;
 
+/** The photo's subject mask the main panel's Subject sliders work on: its first plain one (the
+ *  subject alone, not inverted, nothing added or taken away). -1 if it has none. */
+export function mainSubjectIndex(list: readonly Gradient[]): number {
+  return list.findIndex((g) => g.kind === "subject" && !g.invert && !(g.parts?.length) && !g.frozen);
+}
+
 /** A subject mask's Feather to start with: a soft edge like Lightroom's Select Subject. */
 export const SUBJECT_FEATHER = 25;
 

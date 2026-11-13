@@ -42,6 +42,15 @@ const STRAIGHT_LEAN: f32 = 0.025;
 const STRAIGHT_GAP: usize = 4;
 /// ...unbroken for at least this fraction of the image height (width for horizontals).
 const STRAIGHT_RUN_FRACTION: f32 = 0.12;
+/// Level trusts lines only when most of them agree: within this many degrees of their weighted
+/// median...
+const LEVEL_AGREE_DEG: f32 = 2.0;
+/// ...this share of their combined length at least...
+const LEVEL_AGREE_SHARE: f32 = 0.6;
+/// ...and never turns further than this. On 11 Nov "+ straighten" turned hand-held portraits by up
+/// to 34.6 deg: the keystone fit's rotation, extrapolated from three short lines 10 deg and more
+/// apart (a sleeve, a door edge), far outside the leans it was fitted to.
+const MAX_LEVEL_DEG: f32 = 10.0;
 
 
 #[derive(serde::Serialize, Clone, Debug)]
@@ -59,6 +68,9 @@ pub struct AutoTransform {
     pub vertical_tilt_deg: Option<f32>,
     /// How many straight lines the measurement is based on.
     pub line_count: usize,
+    /// How many agreeing lines Level's turn is based on: 0 when they disagreed, or asked for more
+    /// than `MAX_LEVEL_DEG` (Level then leaves the photo as it is).
+    pub level_line_count: usize,
 }
 
 struct Line {
@@ -235,6 +247,43 @@ fn weighted_median_lean(lines: &[Line]) -> f32 {
     0.0
 }
 
+/// Level's lean (degrees, the lines' own: dx per dy, or dy per dx for horizontals) when the lines
+/// agree (`LEVEL_AGREE_DEG`, `LEVEL_AGREE_SHARE`), and how many lines agreed: their length-weighted
+/// mean. Two agreeing lines at least, or one long one (`min_single`, analysis pixels).
+fn consensus(lines: &[Line], min_single: f32) -> Option<(f32, usize)> {
+    if lines.is_empty() {
+        return None;
+    }
+    let median = weighted_median_lean(lines).atan().to_degrees();
+    let agree: Vec<&Line> = lines.iter().filter(|l| (l.lean.atan().to_degrees() - median).abs() <= LEVEL_AGREE_DEG).collect();
+    let total: f32 = lines.iter().map(|l| l.votes).sum();
+    let agreed: f32 = agree.iter().map(|l| l.votes).sum();
+    let enough = agree.len() >= 2 || agree.first().is_some_and(|l| l.votes >= min_single);
+    if !enough || agreed < LEVEL_AGREE_SHARE * total {
+        return None;
+    }
+    let mean = agree.iter().map(|l| l.votes * l.lean.atan().to_degrees()).sum::<f32>() / agreed;
+    Some((mean, agree.len()))
+}
+
+/// Level's turn (clockwise degrees) and the lines it's based on: the verticals' when they agree;
+/// the horizontals' (a horizon) only when there are fewer than three verticals, as before 11 Nov
+/// (indoors, "horizontals" are mostly tables and floors running into the picture: 23 Oct); (0, 0)
+/// when the lines it uses disagree or the turn would pass `MAX_LEVEL_DEG`. A rotation only, so not the keystone fit's `r`, which leans on its convergence
+/// term and can land far from every line measured.
+fn level_of(verticals: &[Line], horizontals: &[Line], w: u32, h: u32) -> (f32, usize) {
+    let within = |t: &(f32, usize)| t.0.abs() <= MAX_LEVEL_DEG;
+    // One vertical alone counts if it runs most of the photo's height; one horizontal, half its width.
+    let from_v = consensus(verticals, 0.6 * h as f32).filter(within);
+    // A horizontal with dy/dx = s > 0 runs downhill to the right, i.e. the photo is turned
+    // clockwise, so turning back is negative.
+    let from_h = consensus(horizontals, 0.5 * w as f32).map(|(d, n)| (-d, n)).filter(within);
+    if verticals.len() >= 3 {
+        return from_v.unwrap_or((0.0, 0));
+    }
+    from_v.or(from_h).unwrap_or((0.0, 0))
+}
+
 /// `focal_ratio` is the lens's focal length as a fraction of the image's long
 /// edge (35mm-equivalent focal length / 36). It turns the measured
 /// convergence into a camera tilt angle.
@@ -246,6 +295,7 @@ pub fn analyse(img: &DynamicImage, focal_ratio: f32) -> AutoTransform {
     // A horizontal with dy/dx = s > 0 runs downhill to the right, i.e. the photo
     // is turned clockwise, so turning back is negative: -atan(s).
     let horizontals = find_lines(&gx, &gy, w as usize, h as usize, false);
+    let (level_deg, level_lines) = level_of(&verticals, &horizontals, w, h);
     let from_horizontals = (!horizontals.is_empty()).then(|| -weighted_median_lean(&horizontals).atan().to_degrees());
 
     if verticals.len() >= 3 {
@@ -260,7 +310,8 @@ pub fn analyse(img: &DynamicImage, focal_ratio: f32) -> AutoTransform {
         // Level on the verticals too: weighing the horizontals in (as Lightroom's Level does) tilted
         // indoor photos, whose "horizontals" are mostly tables and floors running into the picture
         // (tried 23 Oct on a wedding: two of three big changes were worse).
-        return AutoTransform { rotate_deg, rotate_level_deg: rotate_deg, vertical_tilt_deg: Some(tilt), line_count: used };
+        // Level weighs only the lines that agree (`level_of`).
+        return AutoTransform { rotate_deg, rotate_level_deg: level_deg, vertical_tilt_deg: Some(tilt), line_count: used, level_line_count: level_lines };
     }
 
     // Not enough verticals: level on the horizontals instead, if there are two or more, or one that
@@ -268,9 +319,33 @@ pub fn analyse(img: &DynamicImage, focal_ratio: f32) -> AutoTransform {
     // a step, and the photo is better left as it is.
     let trusted = horizontals.len() >= 2 || horizontals.first().is_some_and(|l| l.votes >= 0.5 * w as f32);
     if let Some(h_deg) = from_horizontals.filter(|_| trusted) {
-        return AutoTransform { rotate_deg: h_deg, rotate_level_deg: h_deg, vertical_tilt_deg: None, line_count: horizontals.len() };
+        return AutoTransform { rotate_deg: h_deg, rotate_level_deg: level_deg, vertical_tilt_deg: None, line_count: horizontals.len(), level_line_count: level_lines };
     }
-    AutoTransform { rotate_deg: 0.0, rotate_level_deg: 0.0, vertical_tilt_deg: None, line_count: 0 }
+    AutoTransform { rotate_deg: 0.0, rotate_level_deg: level_deg, vertical_tilt_deg: None, line_count: 0, level_line_count: level_lines }
+}
+
+/// What `analyse` saw, line by line, for checking a photo it levelled badly (examples/level_check).
+pub fn describe(img: &DynamicImage) -> String {
+    let small = img.resize(ANALYSIS_DIM, ANALYSIS_DIM, FilterType::Triangle).to_luma8();
+    let (w, h) = small.dimensions();
+    let (gx, gy) = gradients(&small);
+    let mut out = format!("analysed at {w}x{h}\n");
+    for (name, vertical) in [("verticals", true), ("horizontals", false)] {
+        let lines = find_lines(&gx, &gy, w as usize, h as usize, vertical);
+        out += &format!("{name}: {}\n", lines.len());
+        for l in &lines {
+            out += &format!("  lean {:+6.2} deg  offset {:+6.0} px  run {:4.0} px\n", l.lean.atan().to_degrees(), l.offset, l.votes);
+        }
+        if vertical && lines.len() >= 3 {
+            let (r, k, used) = robust_fit(&lines);
+            out += &format!("  fit: r {:+.2} deg, k {:+.6}, {used} kept; weighted median lean {:+.2} deg\n", r.atan().to_degrees(), k, weighted_median_lean(&lines).atan().to_degrees());
+        }
+    }
+    let horizontals = find_lines(&gx, &gy, w as usize, h as usize, false);
+    let verticals = find_lines(&gx, &gy, w as usize, h as usize, true);
+    let (deg, n) = level_of(&verticals, &horizontals, w, h);
+    out += &format!("level: {deg:+.2} deg from {n} agreeing lines\n");
+    out
 }
 
 #[cfg(test)]
@@ -332,6 +407,34 @@ mod tests {
         let result = analyse(&synthetic(-(2f32.to_radians().tan()), 0.0003), 1.0);
         assert!((result.rotate_deg + 2.0).abs() < 0.6, "{:?}", result);
         assert!(result.vertical_tilt_deg.unwrap() > 3.0, "{:?}", result);
+    }
+
+    /// Lines as level_check measured them on the 11 Nov portraits: (lean degrees, run px).
+    fn lines(leans: &[(f32, f32)]) -> Vec<Line> {
+        leans.iter().map(|&(d, run)| Line { lean: d.to_radians().tan(), offset: 0.0, votes: run }).collect()
+    }
+
+    #[test]
+    fn level_ignores_lines_that_disagree() {
+        let (w, h) = (1000, 667);
+        // P1346896 (was turned +34.6): two agree near 0, one is 10 degrees off.
+        let (d, n) = level_of(&lines(&[(-0.0, 103.0), (0.29, 119.0), (-9.93, 90.0)]), &[], w, h);
+        assert!(d.abs() < 0.3 && n == 2, "{d} {n}");
+        // P1336791 (was +33.2): all three disagree, no horizontals: left alone.
+        assert_eq!(level_of(&lines(&[(-14.31, 113.0), (5.14, 81.0), (-9.09, 93.0)]), &[], w, h), (0.0, 0));
+        // P1336888 (was +14.3): one of three near 0, one short horizontal: left alone.
+        assert_eq!(level_of(&lines(&[(0.57, 88.0), (15.38, 92.0), (-14.04, 86.0)]), &lines(&[(2.86, 239.0)]), w, h), (0.0, 0));
+        // P1336762 (was -11.9): five verticals, scattered: left alone (its horizontals aren't used
+        // with three verticals or more).
+        assert_eq!(level_of(&lines(&[(-8.25, 101.0), (-3.15, 100.0), (-12.95, 92.0), (-11.59, 91.0), (-1.72, 104.0)]), &lines(&[(0.29, 181.0), (0.0, 135.0), (1.15, 141.0)]), w, h), (0.0, 0));
+        // P1336720 (was -0.9, fine): one vertical, four horizontals that agree.
+        let (d, n) = level_of(&lines(&[(-1.72, 181.0)]), &lines(&[(1.15, 231.0), (0.86, 413.0), (-0.29, 120.0), (0.86, 152.0)]), w, h);
+        assert!((d + 0.9).abs() < 0.4 && n >= 3, "{d} {n}");
+        // P1336790 (was -15.1): verticals agree, but on 17 degrees, past the limit.
+        assert_eq!(level_of(&lines(&[(16.96, 99.0), (17.74, 90.0), (11.03, 83.0)]), &lines(&[(1.43, 182.0)]), w, h), (0.0, 0));
+        // P1336733 (was -0.5, fine): still levelled about the same.
+        let (d, _) = level_of(&lines(&[(-0.86, 211.0), (-1.15, 102.0), (0.0, 158.0), (-1.72, 102.0)]), &lines(&[(12.13, 132.0)]), w, h);
+        assert!((d + 0.7).abs() < 0.3, "{d}");
     }
 
     #[test]

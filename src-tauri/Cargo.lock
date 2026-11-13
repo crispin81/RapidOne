@@ -3871,7 +3871,7 @@ checksum = "ca45419789ae5a7899559e9512e58ca889e41f04f1f2445e9f4b290ceccd1d08"
 
 [[package]]
 name = "rapidone"
-version = "1.2.1"
+version = "1.2.2"
 dependencies = [
  "base64 0.23.1",
  "bytemuck",
@@ -3897,6 +3897,7 @@ dependencies = [
  "tauri-plugin-rapidculling",
  "tauri-plugin-rapidretouch",
  "tiff",
+ "webkit2gtk",
  "wgpu",
 ]
 
@@ -5024,7 +5025,7 @@ dependencies = [
 [[package]]
 name = "tauri-plugin-rapidculling"
 version = "1.0.0"
-source = "git+https://github.com/crispin81/RapidCulling-module?branch=module#86b51b4115de7cac553ddfb70685cb876d6482ca"
+source = "git+https://github.com/crispin81/RapidCulling-module?branch=module#7c136058320460a27f4a70c1864907e496f3a594"
 dependencies = [
  "base64 0.23.1",
  "chrono",

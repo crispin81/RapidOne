@@ -4277,3 +4277,57 @@ button:not(:disabled):hover {
 .update-chip button:hover {
   color: rgb(255, 122, 26);
 }
+
+/* Style button while Train Style / Increase training / Apply Style runs: it fills left to right
+   with the progress bars' orange-to-cyan (Chris, 12 Nov), the label on top. Full strength although
+   it's disabled meanwhile. No endless sweep, unlike .handback-progress__fill: one running for a
+   whole job redrew the window non-stop, and WebKitGTK's drawing locked up under that (24 Oct). */
+.topbar__menu > button.autostyle__button--busy {
+  position: relative;
+  overflow: hidden;
+  opacity: 1;
+  color: #ffffff;
+}
+
+.autostyle__fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  background: linear-gradient(90deg, rgb(255, 122, 26), #3ee6ff);
+  opacity: 0.6;
+  transition: width 0.4s ease;
+  pointer-events: none;
+}
+
+/* A stage without a count (starting, checking contrast): the whole button, dimmer. */
+.autostyle__fill--unknown {
+  width: 100%;
+  opacity: 0.25;
+}
+
+.autostyle__button--busy .autostyle__label {
+  position: relative;
+  text-shadow: 0 0 3px rgba(0, 0, 0, 0.9), 0 0 1px #000000;
+}
+
+/* "Finding subject" over the top of the viewer while the photo's subject is found for a subject
+   mask or the subject-aware vignette (3-4 s; Chris, 12 Nov). The spinner is the Remove tool's. */
+.subject-finding {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid rgba(62, 230, 255, 0.4);
+  border-radius: 6px;
+  background: rgba(8, 8, 8, 0.85);
+  color: #a6dde9;
+  font-size: 12px;
+  pointer-events: none;
+}

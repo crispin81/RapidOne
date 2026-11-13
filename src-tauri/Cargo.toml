@@ -1,6 +1,6 @@
 [package]
 name = "rapidone"
-version = "1.2.1"
+version = "1.2.2"
 description = "RapidOne RAW editor"
 authors = ["Chris Cork Photography"]
 edition = "2021"
@@ -65,6 +65,9 @@ ort = { version = "=2.0.0-rc.14", default-features = false, features = ["webgpu"
 libc = "0.2"
 # Touchpad pinch taken off WebKitGTK (pinch.rs): the GTK the webview is built on. MIT, already in the tree.
 gtk = "0.18"
+# Stopping WebKit's web process before the window closes (quit.rs): the WebKitGTK bindings the
+# webview is built on. MIT, already in the tree via wry (same 2.0 version; terminate_web_process is 2.34+).
+webkit2gtk = { version = "2.0", features = ["v2_34"] }
 
 # Apple Silicon Macs: ONNX Runtime with CoreML, so AI noise reduction runs on the Mac's graphics
 # (ONNX Runtime ships CoreML builds for Apple Silicon only; Intel Macs stay on the CPU).

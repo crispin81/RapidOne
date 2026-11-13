@@ -127,7 +127,7 @@ fn process_photo(raw_path: &Path, jpeg_path: Option<&Path>) -> Result<PhotoInfo,
 
 /// The ready-made picture for a photo's quick preview: a TIFF or JPEG is its
 /// own picture; a RAW uses its same-name JPEG if it has one (else its embedded preview).
-fn picture_file(photo: &Path) -> Option<PathBuf> {
+pub fn picture_file(photo: &Path) -> Option<PathBuf> {
     if crate::imagefile::is_image_file(photo) {
         return Some(photo.to_path_buf());
     }
@@ -1036,7 +1036,8 @@ const THUMB_EDGE: u32 = 480;
 /// so the photos being edited stay in the scene cache. Quick if it's found already.
 #[tauri::command]
 pub async fn find_subject(path: String) -> Result<bool, String> {
-    tauri::async_runtime::spawn_blocking(move || {
+    // At background priority (it's work done ahead: a paste's photos, Subject mask: all photos).
+    tauri::async_runtime::spawn_blocking(move || background_pool().install(|| {
         let photo = Path::new(&path);
         if crate::diskcache::load_mask(photo).is_some() {
             return Ok(true);
@@ -1049,7 +1050,7 @@ pub async fn find_subject(path: String) -> Result<bool, String> {
             }
             None => false,
         })
-    })
+    }))
     .await
     .map_err(|e| e.to_string())?
 }
@@ -1413,7 +1414,11 @@ pub async fn auto_style_train(app: tauri::AppHandle, name: String, folders: Vec<
                 let _ = app.emit("style-progress", StyleProgress { stage, done, total });
             }
         };
-        let trained = crate::autostyle::train(&name, &folders, base, &progress)?;
+        // On the background threads, at the priority the previews made ahead are built at (Linux's
+        // idle class): training's reading (a RAW decode each, on every core) at normal priority left
+        // those previews no processor until it finished, so the grid looked stuck (Chris, 12 Nov).
+        // They now share, and a slider moved meanwhile still gets the cores first.
+        let trained = background_pool().install(|| crate::autostyle::train(&name, &folders, base, &progress))?;
         crate::autostyle::save(&trained, &path)?;
         Ok(style_info(&path, &trained))
     })

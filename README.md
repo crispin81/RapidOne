@@ -25,6 +25,7 @@ Part of a family of apps by Chris Cork Photography: RapidOne brings
 
 **[⬇ Download the latest version](https://github.com/crispin81/RapidOne/releases/latest)**
 
+- **2026-11-13 (v1.2.2, all desktop platforms):** People Mask: one button finds the people in every photo in a folder, and their Exposure and Contrast sit in the main panel (Shift+P). Clipped highlights such as stage lights and specular highlights are rebuilt from the colour round them instead of turning into hard white patches. Fixes: Apply Style freezing on big folders, photos turning black at very high Kelvin with a tint, styles overshooting on photos unlike any they learned from, Cull on folders of 2000+ photos, a crash on closing with NVIDIA on Linux, and straightening that over-rotated portraits. Previews keep coming while a style trains, and the Style and People mask buttons fill as they work. ⚠️ **Linux AppImage needs glibc 2.39 or newer.** That's Ubuntu 24.04+, Linux Mint 22+, Fedora 40+, Debian 13+, or an up-to-date Arch or Manjaro. To check yours, open a terminal and run `ldd --version`. On older systems the AppImage won't start, and you'll see an error mentioning `GLIBC_2.38`, `GLIBC_2.39` or `GLIBCXX_3.4.32`.
 - **2026-11-01 (v1.2.1, all desktop platforms):** Windows, Mac and Linux move to 1.2.1 together. Fixes a hang in sharp previews, AI Noise running again on every render when zoomed in, white patches in bright skies, and a stretch on crop and on coming back to Edit. Sharper drags when zoomed in, Retouch keeps its zoom while preparing, and both Windows installers include DirectML.dll.
 - **2026-11-01 (v1.2.0, Windows and Mac):** Colour noise reduction, on by default for RAW files, with its slider behind a Legacy noise button. A white balance eyedropper with an R G B readout, and Defringe with its own eyedropper. Fit renders at your screen's resolution, Sharpen is refitted and goes below 0 to soften, panning is sharper, and the home screen says when an update is out. Linux 1.2.0 to follow.
 - **2026-10-30 (v1.1.0, all platforms):** Mac moves to 1.1.0, with the GPU render engine on Metal. Every platform is rebuilt with three fixes: the Curves histogram stays up while you drag, switching folder while one is reading no longer mixes the two, and a × on the loading bar stops a folder read
@@ -48,11 +49,19 @@ Part of a family of apps by Chris Cork Photography: RapidOne brings
 | **Meta VR glasses** | Coming soon |
 | **Android** (RapidCull, phone culling) | [![APK](https://img.shields.io/badge/APK-3ee6ff?style=for-the-badge)](https://github.com/crispin81/RapidOne/releases/latest/download/RapidCull_android.apk) |
 
+> ⚠️ **Linux AppImage needs glibc 2.39 or newer.** That's Ubuntu 24.04+, Linux Mint 22+, Fedora 40+, Debian 13+, or an up-to-date Arch or Manjaro. To check yours, open a terminal and run `ldd --version`. On older systems the AppImage won't start, and you'll see an error mentioning `GLIBC_2.38`, `GLIBC_2.39` or `GLIBCXX_3.4.32`.
+
 ## Installing on Linux
 
 Works on Ubuntu 24.04 or newer, Linux Mint 22, Pop!_OS 24.04, Fedora 40+, Debian 13, Arch,
 Omarchy, EndeavourOS, openSUSE Tumbleweed and other recent distributions (64-bit). Older
 releases such as Ubuntu 22.04 aren't supported.
+
+**Troubleshooting: the AppImage won't start, or says `GLIBC_2.38`, `GLIBC_2.39` or
+`GLIBCXX_3.4.32` not found.** Your system's glibc is older than 2.39, which RapidOne needs.
+Run `ldd --version`: the number at the end of the first line is your glibc version. On
+Ubuntu 22.04, Debian 12, Linux Mint 21 or older, the only fix is upgrading to a newer
+release of your distribution (Ubuntu 24.04, Debian 13, Mint 22).
 
 **AppImage** (any distribution): make it executable, then run it:
 

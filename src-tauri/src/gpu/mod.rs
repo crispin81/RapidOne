@@ -862,7 +862,46 @@ impl Engine {
 
 /// Runs `f` with the engine (started if it isn't), catching wgpu's errors; on any, the engine is
 /// let go so the next render starts it afresh.
-fn with_engine<R>(header: &str, f: impl FnOnce(&mut Engine) -> Result<R, String>) -> Result<R, String> {
+///
+/// The engine's lock is never held on a rayon worker thread (11 Nov: Apply Style + straighten froze
+/// the app on Linux). The render inside the lock uses rayon (the scene's hash, unpacking the result,
+/// Definition's sort), and a rayon worker waiting on those picks up other queued jobs meanwhile: with
+/// background renders queued (a style going through a folder), it could start another render on the
+/// same thread, which then waited forever for the lock that thread already held, and every other
+/// render after it. So from a worker thread the render runs on a plain thread of its own, which only
+/// waits, never takes other work.
+///
+/// And the rayon work inside the lock runs on a pool of its own (`locked_pool`): with every thread of
+/// the shared pool waiting for the lock (Train Style measures photos on it, each a render), the
+/// render holding it would otherwise wait for a free thread of that pool forever. Only one render
+/// holds the lock, so that pool only ever has one render's work in it.
+fn with_engine<R: Send>(header: &str, f: impl FnOnce(&mut Engine) -> Result<R, String> + Send) -> Result<R, String> {
+    if rayon::current_thread_index().is_none() {
+        return with_engine_here(header, f);
+    }
+    let (result, detail_done) = std::thread::scope(|s| {
+        s.spawn(|| {
+            let result = with_engine_here(header, f);
+            (result, DETAIL_DONE.with(|d| d.get()))
+        })
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+    });
+    // The sharpening and grain done on the GPU was noted on that thread: noted here too, for
+    // `detail_done` (asked on this one).
+    if detail_done {
+        DETAIL_DONE.with(|d| d.set(true));
+    }
+    result
+}
+
+/// The threads for the rayon work of the render holding the engine's lock (`with_engine`).
+fn locked_pool() -> &'static rayon::ThreadPool {
+    static POOL: std::sync::OnceLock<rayon::ThreadPool> = std::sync::OnceLock::new();
+    POOL.get_or_init(|| rayon::ThreadPoolBuilder::new().thread_name(|i| format!("gpu-cpu-{i}")).build().expect("GPU render thread pool"))
+}
+
+fn with_engine_here<R: Send>(header: &str, f: impl FnOnce(&mut Engine) -> Result<R, String> + Send) -> Result<R, String> {
     let mut guard = ENGINE.lock().unwrap();
     if guard.as_ref().is_some_and(|e| e.lost.load(Ordering::Relaxed)) {
         *guard = None;
@@ -885,7 +924,15 @@ fn with_engine<R>(header: &str, f: impl FnOnce(&mut Engine) -> Result<R, String>
     engine.pipelines(header)?;
     let oom = engine.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
     let invalid = engine.device.push_error_scope(wgpu::ErrorFilter::Validation);
-    let result = f(engine);
+    // On `locked_pool`'s threads; the sharpening and grain done on the GPU, noted on the one `f` ran
+    // on, noted here too (for `detail_done`, asked on this thread).
+    let (result, detail_done) = locked_pool().install(|| {
+        let result = f(&mut *engine);
+        (result, DETAIL_DONE.with(|d| d.replace(false)))
+    });
+    if detail_done {
+        DETAIL_DONE.with(|d| d.set(true));
+    }
     engine.pool.lock().unwrap().end_render();
     let invalid = pollster::block_on(invalid.pop());
     let oom = pollster::block_on(oom.pop());

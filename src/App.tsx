@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { open } from "@tauri-apps/plugin-dialog";
 import "./App.css";
 import "./moduleTweaks.css";
-import { ALL_SLIDERS, defaultsFor, formatValue, nudge, panelForKey, SLIDER_GROUPS, type Adjustments, type SliderDef } from "./adjustments";
+import { ALL_SLIDERS, defaultsFor, formatValue, nudge, panelForKey, SLIDER_GROUPS, SUBJECT_SLIDERS, type Adjustments, type SliderDef } from "./adjustments";
 import { DEFAULT_PICKS, MIXER_HOLD, holdTarget, tapPick, type PanelPicks } from "./panelKeys";
 import {
   adobeColorAvailable,
@@ -40,6 +40,7 @@ import {
   trashPhotos,
   restorePhotos,
   clearHandoffs,
+  closeApp,
   moveToUnrated,
   renderPreview,
   renderHandoff,
@@ -88,10 +89,11 @@ import {
 import { applyLightroom, describeApplied, parsePreset, presetFromLightroom, presetFromState, presetText, type RapidPreset } from "./preset";
 import PresetMenu, { type PresetScope } from "./components/PresetMenu";
 import ContextMenu, { type ContextMenuItem } from "./components/ContextMenu";
-import { Check, RotateCcw, Star, Trash2 } from "lucide-react";
+import { Check, Loader2, RotateCcw, Star, Trash2 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import AutoStyleMenu, { type AutoStyleScope } from "./components/AutoStyleMenu";
 import DenoiseMenu from "./components/DenoiseMenu";
+import SubjectAllButton from "./components/SubjectAllButton";
 import LensMenu from "./components/LensMenu";
 import PickOverlay, { type PickerKind } from "./components/PickOverlay";
 import { checkLensUpdates } from "./lensUpdates";
@@ -118,7 +120,7 @@ import { DEFAULT_GRADE, type Grade } from "./grade";
 import { DEFAULT_MIXER, type Mixer } from "./mixer";
 import { computeHistogram, type Histogram } from "./histogram";
 import { isNoCrop, NO_CROP, straightCrop, type Crop } from "./crop";
-import { hasSubject, isMaskSlider, MASK_SLIDER_IDS, maskSliderDef, type Gradient } from "./gradients";
+import { hasSubject, isMaskSlider, mainSubjectIndex, MASK_SLIDER_IDS, maskSliderDef, newGradient, type Gradient } from "./gradients";
 import GradientOverlay from "./components/GradientOverlay";
 import ViewSwitch, { folderFor, viewOf, type FolderViews } from "./components/ViewSwitch";
 import { editFromSnapshot, editHasContent, parseSidecar, sidecarText, snapshotFromEdit, type PhotoLook, type SidecarFile } from "./sidecar";
@@ -550,6 +552,32 @@ export default function App() {
   const crop = (currentPath && cropByPath[currentPath]) || NO_CROP;
   const removals = (currentPath && removalsByPath[currentPath]) || NO_REMOVALS;
   const gradients = (currentPath && gradientsByPath[currentPath]) || NO_GRADIENTS;
+  // The photo on screen whose subject is being found (an AI model, 3-4 s of every core), for the
+  // "Finding subject" note over the viewer (Chris, 12 Nov). Shown only past 300 ms, so a subject
+  // already found (kept with the photo or in the folder's cache) doesn't flash it.
+  const [findingSubject, setFindingSubject] = useState<string | null>(null);
+  const usesSubjectNow = Boolean(currentPath) && ((values.adaptiveVignette ?? 0) !== 0 || gradients.some(hasSubject));
+  useEffect(() => {
+    if (!usesSubjectNow || !currentPath) return;
+    const path = currentPath;
+    let done = false;
+    const timer = window.setTimeout(() => {
+      if (!done) setFindingSubject(path);
+    }, 300);
+    // The same search the render waits on (the photo keeps its subject once found), so no extra work.
+    void prepareSubject(path)
+      .catch(() => false)
+      .finally(() => {
+        done = true;
+        window.clearTimeout(timer);
+        setFindingSubject((p) => (p === path ? null : p));
+      });
+    return () => {
+      done = true;
+      window.clearTimeout(timer);
+      setFindingSubject(null);
+    };
+  }, [currentPath, usesSubjectNow]);
 
   // Undo / redo (history.ts): per photo, snapshots of the whole edit.
   const editState = useRef({ edits, curvesByPath, gradeByPath, mixerByPath, profileByPath, cropByPath, removalsByPath, gradientsByPath });
@@ -1773,6 +1801,22 @@ export default function App() {
   const setSlider = useCallback(
     (id: string, value: number) => {
       if (!currentPath) return;
+      // The main panel's People Mask sliders: the photo's subject mask's own Exposure / Contrast (one
+      // undo step per drag, shared with the Masks panel's for that mask).
+      const subjectField = SUBJECT_SLIDERS[id];
+      if (subjectField) {
+        const list = editState.current.gradientsByPath[currentPath] ?? [];
+        const index = mainSubjectIndex(list);
+        if (index < 0) return;
+        record(currentPath, `gradient:${index}:${subjectField}`);
+        setGradientsByPath((prev) => {
+          const now = [...(prev[currentPath] ?? [])];
+          if (!now[index]) return prev;
+          now[index] = { ...now[index], [subjectField]: value };
+          return { ...prev, [currentPath]: now };
+        });
+        return;
+      }
       // A mask tool open: the picked mask's slider, never the photo's (the others do nothing).
       if (maskModeRef.current) {
         const t = maskTarget.current;
@@ -1797,12 +1841,15 @@ export default function App() {
   );
   // What the bottom panel (and the slider keys) show and move: the photo's values, or with a
   // mask tool open the picked mask's for the sliders masks have.
+  const subjectIndex = mainSubjectIndex(gradients);
+  const subjectMask = subjectIndex >= 0 ? gradients[subjectIndex] : null;
   const panelValues: Adjustments = useMemo(() => {
-    if (!maskMode) return values;
-    const out = { ...values } as Record<string, number>;
+    const own = { ...values, subjectExposure: subjectMask?.exposure ?? 0, subjectContrast: subjectMask?.contrast ?? 0 };
+    if (!maskMode) return own;
+    const out = { ...own } as Record<string, number>;
     for (const id of MASK_SLIDER_IDS) out[id] = pickedMask ? (pickedMask[id] as number) : 0;
     return out as Adjustments;
-  }, [maskMode, values, pickedMask]);
+  }, [maskMode, values, pickedMask, subjectMask]);
   const panelNeutrals: Adjustments = useMemo(() => {
     if (!maskMode) return neutrals;
     const out = { ...neutrals } as Record<string, number>;
@@ -1861,7 +1908,8 @@ export default function App() {
       const one = async (path: string) => {
         try {
           const result = await autoTransform(path);
-          if (result.lineCount === 0) {
+          // Level: only lines that agree, within 10 degrees (transform.rs level_of); else left alone.
+          if ((kind === "keystone" ? result.lineCount : result.levelLineCount) === 0) {
             noLines++;
             return;
           }
@@ -2178,6 +2226,9 @@ export default function App() {
   // own edits, for this photo or every photo in the folder (one undo step each).
   const [autoStyles, setAutoStyles] = useState<AutoStyle[]>([]);
   const [autoStyleProgress, setAutoStyleProgress] = useState<string | null>(null);
+  // How far the running job is (0-1), for the fill inside the Style button; null while a stage has
+  // no count (it then shows a dimmer full fill).
+  const [autoStyleFraction, setAutoStyleFraction] = useState<number | null>(null);
   const reloadStyles = useCallback(() => {
     autoStyleList().then(setAutoStyles).catch(() => setAutoStyles([]));
   }, []);
@@ -2188,11 +2239,16 @@ export default function App() {
   const trainStyle = useCallback(
     async (name: string, folders: string[], style?: AutoStyle) => {
       setAutoStyleProgress("Training…");
+      setAutoStyleFraction(null);
       const unlisten = await onStyleProgress((p) => {
-        const pct = Math.round((p.done / Math.max(p.total, 1)) * 100);
+        const share = p.done / Math.max(p.total, 1);
+        const pct = Math.round(share * 100);
         setAutoStyleProgress(
           p.stage === "reading" ? `Reading edits ${p.done}/${p.total}` : p.stage === "checking" ? "Checking contrast…" : `Training ${pct}%`,
         );
+        // One fill for the whole job: reading the edits is most of the time (a RAW decode each),
+        // so it fills the first 70%, training the rest.
+        setAutoStyleFraction(p.stage === "reading" ? 0.7 * share : p.stage === "checking" ? 0.7 : 0.7 + 0.3 * share);
       });
       try {
         const trained = await autoStyleTrain(name, folders, style?.path);
@@ -2208,6 +2264,7 @@ export default function App() {
       } finally {
         unlisten();
         setAutoStyleProgress(null);
+        setAutoStyleFraction(null);
       }
     },
     [reloadStyles],
@@ -2215,6 +2272,52 @@ export default function App() {
   // Denoise all: the Noise slider on every photo shot at `minIso` or above (one undo step each);
   // photos below it, or with no ISO in their file, keep theirs.
   const [denoiseProgress, setDenoiseProgress] = useState<string | null>(null);
+  // People mask: all photos. Each photo without a plain subject mask gets one (one undo step each,
+  // nothing else of its edit changed), then every photo's subject is found in turn in the background
+  // (an AI model, 3-4 s each; kept in the folder's cache, so photos done before are quick), the photo
+  // on screen first; then their pictures are brought up to date as a style's are.
+  const [subjectProgress, setSubjectProgress] = useState<string | null>(null);
+  const [subjectFraction, setSubjectFraction] = useState<number | null>(null);
+  const applySubjectAll = useCallback(async () => {
+    const here = Math.max(0, photos.findIndex((p) => p.path === currentPath));
+    const all = photos.map((p, i) => ({ p: p.path, d: Math.abs(i - here) })).sort((a, b) => a.d - b.d).map((x) => x.p);
+    if (all.length === 0) return;
+    // Their saved edits first (see loadEditsRef), so the mask goes on top of their own masks.
+    await loadEditsRef.current(all);
+    const st = editState.current;
+    const adding = all.filter((p) => mainSubjectIndex(st.gradientsByPath[p] ?? []) < 0);
+    if (adding.length) {
+      for (const p of [...adding].reverse()) record(p, null);
+      const added: Record<string, Gradient[]> = Object.fromEntries(
+        adding.map((p) => [p, [...(st.gradientsByPath[p] ?? []), newGradient("subject", { x: 0.5, y: 0.5 }, { x: 0.5, y: 0.5 })]]),
+      );
+      setGradientsByPath((prev) => ({ ...prev, ...added }));
+      editState.current = { ...st, gradientsByPath: { ...st.gradientsByPath, ...added } };
+      markReady(adding, false);
+    }
+    let done = 0;
+    let missed = 0;
+    setSubjectProgress(`Finding people 0/${all.length}`);
+    setSubjectFraction(0);
+    for (const p of all) {
+      // A slider moved meanwhile goes first.
+      while (interactingRef.current) await new Promise((r) => setTimeout(r, 150));
+      if (!(await findSubject(p).catch(() => false))) missed++;
+      // Its picture brought up to date as soon as its subject is known (the photo on screen renders itself).
+      if (p !== currentPath && adding.includes(p)) prepareFull([p]);
+      done++;
+      setSubjectProgress(`Finding people ${done}/${all.length}`);
+      setSubjectFraction(done / all.length);
+    }
+    setSubjectProgress(null);
+    setSubjectFraction(null);
+    setNotice(
+      `People mask on ${all.length} photo${all.length === 1 ? "" : "s"}` +
+        (adding.length < all.length ? ` (${all.length - adding.length} had one already)` : "") +
+        (missed ? `; nobody found in ${missed}` : "") +
+        ". People Mask Exposure and Contrast are in the main panel (Shift+P).",
+    );
+  }, [photos, currentPath, record, markReady, prepareFull]);
   const applyDenoiseAll = useCallback(
     async (minIso: number, amount: number) => {
       // The photo on screen first, then outward from it, so what you're looking at changes first.
@@ -2330,6 +2433,7 @@ export default function App() {
         // on screen first, no bar (Chris, 23 Oct: no thumbnail pass, no progress bar).
         if (render.length) prepareFull(render);
         setAutoStyleProgress(`Applying style ${done}/${paths.length}`);
+        setAutoStyleFraction(done / Math.max(paths.length, 1));
       };
       const timer = window.setInterval(flush, 250);
       const one = async (p: string) => {
@@ -2346,7 +2450,7 @@ export default function App() {
           if (s.contrast != null) withContrast = true;
           // Levelled from scratch (any keystone gone), zoomed just enough to crop out the white the
           // turn uncovers (at most the slider's 150%), as Level all did.
-          if (turn && turn.lineCount > 0) {
+          if (turn && turn.levelLineCount > 0) {
             Object.assign(own, { rotate: roundRotate(turn.rotateLevelDeg), vertical: 0, horizontal: 0, scale: Math.min(150, turn.coverScaleLevel), autoTransform: 1 });
             levelled++;
           }
@@ -2364,6 +2468,7 @@ export default function App() {
         done++;
       };
       setAutoStyleProgress(`Applying style 0/${paths.length}`);
+      setAutoStyleFraction(0);
       await Promise.all(
         // A quarter of the cores' worth at once (8 on 32 cores, 4 on 16), so the rest stay free.
         Array.from({ length: Math.min(Math.min(8, Math.max(1, Math.floor(cores.current / 4))), paths.length) }, async () => {
@@ -2373,6 +2478,7 @@ export default function App() {
       window.clearInterval(timer);
       flush();
       setAutoStyleProgress(null);
+      setAutoStyleFraction(null);
       setNotice(
         `Applied style "${style.name}"${look ? " (its look, then" : " ("} white balance, tint${withContrast ? ", exposure and contrast" : " and exposure"}) to ${done - failed.length} photo${done - failed.length === 1 ? "" : "s"}` +
           (level ? `, ${levelled} levelled` : "") +
@@ -2984,8 +3090,8 @@ export default function App() {
   // Latest state for the keyboard handlers, which are registered once.
   // Export's dialog is open, in front: the shortcuts are off (set once `exporter` is made, below).
   const exportOpenRef = useRef(false);
-  const live = useRef({ photos, currentIndex, currentPhoto, values: panelValues, neutrals: panelNeutrals, held, setSlider, updateFlags, stepHistory, home, selectedPanel, picks, adjustHeld, cropping, mode, copySettings, pasteSettings, removeByWords, defOf, maskMode, toggleRemoving });
-  live.current = { photos, currentIndex, currentPhoto, values: panelValues, neutrals: panelNeutrals, held, setSlider, updateFlags, stepHistory, home, selectedPanel, picks, adjustHeld, cropping, mode, copySettings, pasteSettings, removeByWords, defOf, maskMode, toggleRemoving };
+  const live = useRef({ photos, currentIndex, currentPhoto, values: panelValues, neutrals: panelNeutrals, held, setSlider, updateFlags, stepHistory, home, selectedPanel, picks, adjustHeld, cropping, mode, copySettings, pasteSettings, removeByWords, defOf, maskMode, toggleRemoving, hasSubjectMask: subjectIndex >= 0 });
+  live.current = { photos, currentIndex, currentPhoto, values: panelValues, neutrals: panelNeutrals, held, setSlider, updateFlags, stepHistory, home, selectedPanel, picks, adjustHeld, cropping, mode, copySettings, pasteSettings, removeByWords, defOf, maskMode, toggleRemoving, hasSubjectMask: subjectIndex >= 0 };
 
   useEffect(() => {
     function goTo(delta: number) {
@@ -3080,6 +3186,8 @@ export default function App() {
         const selected = live.current.selectedPanel;
         if (e.shiftKey) {
           const panel = panelForKey(e.code);
+          // People Mask only shows with a subject mask on the photo.
+          if (panel === "People Mask" && !live.current.hasSubjectMask) return;
           if (panel) {
             e.preventDefault();
             setSelectedPanel(panel === selected ? null : panel);
@@ -3507,7 +3615,7 @@ export default function App() {
     const unlisten = win.onCloseRequested(async (event) => {
       event.preventDefault();
       if (closing) {
-        void win.destroy();
+        void closeApp().catch(() => win.destroy());
         return;
       }
       closing = true;
@@ -3522,7 +3630,8 @@ export default function App() {
       // The .rpd writer saves 0.4 s after a change.
       await new Promise((resolve) => setTimeout(resolve, 600));
       await clearHandoffs([...foldersSeen.current]).catch(() => 0);
-      void win.destroy();
+      // (Linux: WebKit's web process stopped first, so it can't crash on the way out; quit.rs.)
+      void closeApp().catch(() => win.destroy());
     });
     return () => {
       void unlisten.then((f) => f());
@@ -3661,10 +3770,12 @@ export default function App() {
               styles={autoStyles}
               applyDisabled={!folder}
               progress={autoStyleProgress}
+              fraction={autoStyleFraction}
               onApply={(s, scope) => void applyAutoStyle(s, scope)}
               onTrain={(name, folders) => void trainStyle(name, folders)}
               onIncrease={(s, folders) => void trainStyle(s.name, folders, s)}
             />
+            <SubjectAllButton disabled={!folder || photos.length === 0} progress={subjectProgress} fraction={subjectFraction} onApply={() => void applySubjectAll()} />
             <DenoiseMenu disabled={!folder || photos.length === 0} progress={denoiseProgress} onApply={(iso, amount) => void applyDenoiseAll(iso, amount)} />
             <CopyPasteMenu
               disabled={!currentPhoto || home}
@@ -3746,6 +3857,11 @@ export default function App() {
       <div className="workspace">
         {pasteProgress && <div className="busy-lock" aria-hidden="true" />}
         <div className="workspace__main">
+          {findingSubject && findingSubject === currentPath && (
+            <div className="subject-finding" role="status">
+              <Loader2 size={13} className="spin" /> Finding subject…
+            </div>
+          )}
           {libraryView && !atHome && (
             <Library
               bottomInset={panelVisible && currentPhoto ? dockHeight : 0}
@@ -3884,6 +4000,7 @@ export default function App() {
               wbPicking={picker === "wb"}
               onPickWhiteBalance={() => togglePicker("wb")}
               values={panelValues}
+              showSubject={subjectIndex >= 0}
               neutrals={panelNeutrals}
               mask={
                 maskMode

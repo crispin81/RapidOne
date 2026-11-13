@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Building2, Pipette, Ruler } from "lucide-react";
-import { PANEL_ORDER, SLIDER_GROUPS, type Adjustments, type SliderGroup } from "../adjustments";
+import { PANEL_ORDER, panelKey, SLIDER_GROUPS, type Adjustments, type SliderGroup } from "../adjustments";
 import type { Curves } from "../curves";
 import type { Grade } from "../grade";
 import type { Histogram } from "../histogram";
@@ -32,11 +32,14 @@ const LIGHTROOM_NAMES: Record<string, string> = {
 
 function PanelTitle({ name }: { name: string }) {
   const lightroom = LIGHTROOM_NAMES[name];
+  const key = panelKey(name);
+  // Gold, underlined letter = the group's key (its first).
+  const at = Math.max(0, name.toUpperCase().indexOf(key));
   return (
-    <h3 className="panel__title" title={`${lightroom ? `${name} (also called ${lightroom})` : name}\nClick, or Shift+${name[0]}, selects it; Esc, Shift+${name[0]} or a click on this title again leaves`}>
-      {/* Gold, underlined first letter = the group's key. */}
-      <span className="panel__key">{name[0]}</span>
-      {name.slice(1)}
+    <h3 className="panel__title" title={`${lightroom ? `${name} (also called ${lightroom})` : name}\nClick, or Shift+${key}, selects it; Esc, Shift+${key} or a click on this title again leaves`}>
+      {name.slice(0, at)}
+      <span className="panel__key">{name[at]}</span>
+      {name.slice(at + 1)}
     </h3>
   );
 }
@@ -90,6 +93,8 @@ interface Props {
   onPickWhiteBalance?: () => void;
   /** A right-click on a group (its name): its menu (Reset its settings). */
   onGroupMenu?: (name: string, x: number, y: number) => void;
+  /** The photo has a subject mask: the People Mask group (its Exposure and Contrast) shows. */
+  showSubject?: boolean;
   mask?: {
     /** The slider as the mask uses it, or null (greyed out). */
     defOf: (def: SliderDef) => SliderDef | null;
@@ -132,6 +137,7 @@ export default function BottomPanel({
   picks,
   onPicks,
   mask,
+  showSubject = false,
   onGroupMenu,
   wbPicking = false,
   onPickWhiteBalance,
@@ -225,6 +231,8 @@ export default function BottomPanel({
         const group = GROUPS_BY_NAME[name];
         return (
           <section key={name} className={groupClass(name)} data-group={name}
+              // Kept, only hidden, without a subject mask: a fresh element flickers in WebKitGTK's drawing.
+              hidden={name === "People Mask" && !showSubject}
               onPointerDown={(e) => pick(name, e)}
               onContextMenu={(e) => {
                 e.preventDefault();

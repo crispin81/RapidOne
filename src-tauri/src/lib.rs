@@ -11,6 +11,7 @@ pub mod fuji;
 pub mod gpu;
 pub mod gradient;
 pub mod gradetable;
+pub mod highlights;
 pub mod demosaic;
 pub mod detail;
 pub mod develop;
@@ -43,6 +44,7 @@ pub mod paramtable;
 pub mod preset;
 pub mod presets;
 pub mod preview;
+pub mod quit;
 pub mod sidecar;
 pub mod subject;
 pub mod transform;
@@ -173,6 +175,7 @@ pub fn run() {
             commands::set_rating,
             commands::set_pick,
             commands::set_rating_and_pick,
+            quit::close_app,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

@@ -157,13 +157,14 @@ fn sample(p: &RgbImage, u: f32, v: f32) -> [f32; 3] {
 /// Patches and removals in the order they were made, each on the result of those before it: a patch
 /// drawn over a removed object patches the removal, and one copying from there copies the removal
 /// (before 24 Oct every patch went first, so a removal made earlier covered a later patch). Runs of
-/// the same kind go together. `sample` reads the patches' sources (fractions of the whole photo);
+/// the same kind go together. `sample` reads the patches' sources (fractions of the whole photo),
+/// told the index of the run's first spot (every spot before it is in the picture it should read);
 /// without one, they're read from the picture as it stands at that point.
 pub fn apply_in_order(
     scene: &crate::pipeline::SceneImage,
     spots: &[Spot],
     frame: Option<&crate::pipeline::Frame>,
-    sample: Option<&(dyn Fn(f32, f32) -> [f32; 3] + Sync)>,
+    sample: Option<&(dyn Fn(usize, f32, f32) -> [f32; 3] + Sync)>,
 ) -> Option<crate::pipeline::SceneImage> {
     let mut current: Option<crate::pipeline::SceneImage> = None;
     let mut i = 0;
@@ -177,7 +178,10 @@ pub fn apply_in_order(
         let base = current.as_ref().unwrap_or(scene);
         let next = if is_patch {
             match sample {
-                Some(s) => crate::patch::apply(base, run, frame, s),
+                Some(s) => {
+                    let at = move |x: f32, y: f32| s(i, x, y);
+                    crate::patch::apply(base, run, frame, &at)
+                }
                 None => {
                     let (w, h) = (base.width, base.height);
                     let px = &base.px;

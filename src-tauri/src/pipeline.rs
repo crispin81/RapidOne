@@ -57,11 +57,10 @@ pub struct SceneImage {
 /// Turns white-balanced camera RGB into a scene image.
 ///
 /// `clip` is where each channel saturates after white balance (the sensor's
-/// ceiling, 1.0, times that channel's multiplier). Where two channels near
-/// their ceilings, the true colour is unknown - it was cut off - so the pixel
-/// is blended towards neutral at its brightest channel's level. Without
-/// this, blown skies and lamps turn magenta. Unclipped highlights keep all
-/// their headroom above 1.
+/// ceiling, 1.0, times that channel's multiplier). A channel cut off there is
+/// estimated again from the others first (`highlights::rebuild`); without that,
+/// blown skies and lamps turn magenta and coloured lights turn into white discs.
+/// Unclipped highlights keep all their headroom above 1.
 pub fn scene_from_camera(
     width: usize,
     height: usize,
@@ -69,26 +68,9 @@ pub fn scene_from_camera(
     clip: [f32; 3],
     camera_to_rec2020: &[[f32; 3]; 3],
 ) -> SceneImage {
-    let px = cam
-        .par_iter()
-        .map(|&c| {
-            // The second fullest channel: with only one at its ceiling (a sunset's red), the others still
-            // know the colour, and blending made a hard white patch there (1 Nov).
-            let mut fills: [f32; 3] = std::array::from_fn(|i| c[i] / clip[i]);
-            fills.sort_by(|a, b| b.total_cmp(a));
-            let fill = fills[1];
-            // 0 below 92% of the ceiling, easing to 1 at the ceiling.
-            let t = ((fill - 0.92) / 0.08).clamp(0.0, 1.0);
-            let t = t * t * (3.0 - 2.0 * t);
-            let blended = if t > 0.0 {
-                let level = c[0].max(c[1]).max(c[2]);
-                std::array::from_fn(|i| c[i] * (1.0 - t) + level * t)
-            } else {
-                c
-            };
-            apply3(camera_to_rec2020, blended).map(|v| v.max(0.0))
-        })
-        .collect();
+    let rebuilt = crate::highlights::rebuild(width, height, cam, clip);
+    let cam = rebuilt.as_deref().unwrap_or(cam);
+    let px = cam.par_iter().map(|&c| apply3(camera_to_rec2020, c).map(|v| v.max(0.0))).collect();
     SceneImage { width, height, px, source_long: width.max(height) }
 }
 
@@ -2853,6 +2835,21 @@ mod tests {
         let p = scene.px[0];
         assert!((p[0] - p[1]).abs() < 1e-6 && (p[1] - p[2]).abs() < 1e-6, "{p:?}");
         assert!(p[0] >= 2.0, "keeps its brightness: {p:?}");
+    }
+
+    #[test]
+    fn two_clipped_channels_stay_coloured_and_one_clipped_keeps_the_others() {
+        // P1347354's glow stick: green and blue at their ceilings, red half full (11-12 Nov).
+        let clip = [2.33, 1.0, 1.46];
+        let id = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+        let tip = [1.16, 1.0, 1.46];
+        let core = scene_from_camera(1, 1, &[tip], clip, &id).px[0];
+        assert!((0..3).all(|k| core[k] >= tip[k] - 1e-6), "nothing below its recording: {core:?}");
+        assert!(core[1] > core[0] + 0.05, "still green, not a white disc: {core:?}");
+        // A sunset's sky (red full, green 73%): green and blue as recorded (1 Nov).
+        let sky = [2.33, 0.73, 0.25 * 1.46];
+        let out = scene_from_camera(1, 1, &[sky], clip, &id).px[0];
+        assert_eq!((out[1], out[2]), (sky[1], sky[2]));
     }
 
     #[test]

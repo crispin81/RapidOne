@@ -9,10 +9,12 @@ export const TILT_DEG_PER_UNIT = 0.4;
 export interface AutoTransform {
   /** The turn from the verticals (keystone's). */
   rotateDeg: number;
-  /** Level's turn: verticals and horizontals together, the horizontals counting double (Lightroom's Level). */
+  /** Level's turn: the agreeing verticals, else the agreeing horizontals; 0 when they disagree or past 10 degrees. */
   rotateLevelDeg: number;
   verticalTiltDeg: number | null;
   lineCount: number;
+  /** The agreeing lines Level's turn is based on: 0 when Level should leave the photo as it is. */
+  levelLineCount: number;
   /** The Scale (percent) that crops out the white once levelled, or levelled and keystoned. */
   coverScaleLevel: number;
   coverScaleKeystone: number;

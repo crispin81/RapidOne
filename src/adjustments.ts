@@ -117,6 +117,17 @@ export const SLIDER_GROUPS: SliderGroup[] = [
     ],
   },
   {
+    // The photo's subject (people) mask's Exposure and Contrast (Shadows until 13 Nov), the most used of its sliders, in the
+    // main panel (Chris, 13 Nov; named People Mask, Shift+P, as Shift+S and Shift+M were taken): the very
+    // values the Masks panel shows for that mask (read and written there, never kept in the photo's
+    // own sliders). Shown once the photo has one ("People mask: all photos" adds one to every photo).
+    name: "People Mask",
+    sliders: [
+      s("subjectExposure", "Exposure", "E", "none", { min: -4, max: 4, step: 0.05, coarseStep: 1 / 3, decimals: 2, tooltip: "People Mask Exposure (the subject mask's)" }),
+      s("subjectContrast", "Contrast", "C", "none", { tooltip: "People Mask Contrast (the subject mask's)" }),
+    ],
+  },
+  {
     // Lightroom's Presence (Texture, Clarity, Dehaze, Vibrance, Saturation),
     // named Definition so its group key (D) doesn't clash with Pick (P).
     name: "Definition",
@@ -240,6 +251,7 @@ export const SLIDER_GROUPS: SliderGroup[] = [
 export const PANEL_ORDER = [
   "W/B",
   "Tone",
+  "People Mask",
   "Definition",
   "Curves",
   "Keystone",
@@ -257,8 +269,16 @@ export const PANEL_ORDER = [
  * W/B, Texture in Definition). Esc, or Shift + its letter again, deselects.
  */
 export function panelForKey(code: string): string | undefined {
-  return PANEL_ORDER.find((name) => `Key${name[0].toUpperCase()}` === code);
+  return PANEL_ORDER.find((name) => `Key${panelKey(name)}` === code);
 }
+
+/** The letter that selects a panel with Shift (upper case): its first. */
+export function panelKey(name: string): string {
+  return name[0].toUpperCase();
+}
+
+/** The photo's own sliders that are really its subject mask's (the "People Mask" group). */
+export const SUBJECT_SLIDERS: Record<string, "exposure" | "contrast"> = { subjectExposure: "exposure", subjectContrast: "contrast" };
 
 /** The slider in `panel` whose letter is `code` (e.g. "KeyT"), if any. */
 export function sliderInPanel(panel: string, code: string): SliderDef | undefined {

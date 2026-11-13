@@ -571,6 +571,11 @@ export function addPhoto(path: string): Promise<PhotoInfo> {
   return invoke("add_photo", { path });
 }
 
+/** Closes the window once everything is saved (quit.rs: on Linux, WebKit's web process is stopped first). */
+export function closeApp(): Promise<void> {
+  return invoke("close_app");
+}
+
 /** Clears the hand-off TIFFs (a cache for Retouch) of these folders' shoots; returns the bytes freed. */
 export function clearHandoffs(folders: string[]): Promise<number> {
   return invoke("clear_handoffs", { folders });

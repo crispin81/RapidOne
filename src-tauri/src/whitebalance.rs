@@ -74,9 +74,14 @@ fn light_xy(kelvin: f32, duv: f32) -> (f32, f32) {
         return uv_to_xy((u, v));
     }
     // Direction along the locus, from a small step in temperature, then the
-    // perpendicular that points towards larger v (green).
-    let (u2, v2) = xy_to_uv(planckian_xy(kelvin * 1.01));
-    let (du, dv) = (u2 - u, v2 - v);
+    // perpendicular that points towards larger v (green). Taken just below the
+    // locus formula's 25000 K end when beyond it: there both points were the same
+    // and the direction 0/0, so any tint made the whole picture black (12 Nov:
+    // five photos a style sent to 50000 K).
+    let k = kelvin.clamp(1667.0, 25000.0 / 1.01);
+    let (u0, v0) = xy_to_uv(planckian_xy(k));
+    let (u2, v2) = xy_to_uv(planckian_xy(k * 1.01));
+    let (du, dv) = (u2 - u0, v2 - v0);
     let len = (du * du + dv * dv).sqrt();
     let (mut nu, mut nv) = (-dv / len, du / len);
     if nv < 0.0 {
@@ -251,6 +256,17 @@ impl WhiteBalance {
 #[cfg(test)]
 mod absolute_tests {
     use super::*;
+
+    #[test]
+    fn a_tint_beyond_25000_kelvin_stays_a_number() {
+        // 50000 K with a tint gave NaN (12 Nov), which rendered black.
+        for k in [24000.0, 25000.0, 30000.0, 50000.0] {
+            for tint in [-15.0, 16.0, 62.0] {
+                let (x, y) = light_xy(k, tint / TINT_PER_DUV);
+                assert!(x.is_finite() && y.is_finite(), "{k} K tint {tint}: {x} {y}");
+            }
+        }
+    }
 
     fn panasonic() -> CameraColour {
         // Panasonic DC-S5M2, as rawler reports it.

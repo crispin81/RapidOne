@@ -29,6 +29,9 @@ const HIST_RANGE: f32 = 1.5;
 const SCALE: [f32; 4] = [30.0, 10.0, 1.0, 10.0];
 /// Most answers a style gives (with Contrast).
 const OUTS: usize = 4;
+/// How far a style's answer may go past its own training edits, either side: mired change, tint
+/// change, Exposure (stops).
+const MARGIN: [f32; 3] = [20.0, 5.0, 0.5];
 /// Most similar edited photos the lookup averages.
 const LOOKUP_K: usize = 15;
 /// Fewest edited photos a style can be trained from.
@@ -59,8 +62,8 @@ pub struct Style {
     pub name: String,
     hist_bins: usize,
     hist_range: f32,
-    mu: Vec<f32>,
-    sd: Vec<f32>,
+    pub mu: Vec<f32>,
+    pub sd: Vec<f32>,
     scale: Vec<f32>,
     layers: Vec<Layer>,
     /// The style's look: one of the training sidecars, masks and crop removed,
@@ -337,11 +340,21 @@ impl Style {
     pub fn predict(&self, raw: &Path) -> Result<Prediction, String> {
         let m = measure(raw)?;
         let net = self.run(&m.f);
-        let a = match self.lookup(&m.f) {
+        let a: Vec<f32> = match self.lookup(&m.f) {
+            // A photo further out on some measurement than any training photo (stage light the
+            // style never saw): the network's answer there is a guess well outside what it learned
+            // (a trained style, 12 Nov: exposure +12 to +33, 50000 K), so the most similar training
+            // photos' corrections alone.
+            Some(near) if self.unlike_any(&m.f) => near,
             Some(near) => net.iter().zip(&near).map(|(x, y)| (x + y) / 2.0).collect(),
             None => net,
         };
-        let (dm, dt, ev) = (a[0], a[1], a[2]);
+        // Never past the photographer's own corrections by more than a small margin.
+        let keep = |c: usize, v: f32| match self.trained_range(c) {
+            Some((lo, hi)) => v.clamp(lo - MARGIN[c], hi + MARGIN[c]),
+            None => v,
+        };
+        let (dm, dt, ev) = (keep(0, a[0]), keep(1, a[1]), keep(2, a[2]));
         let mired = (1e6 / m.shot_kelvin + dm).max(1e6 / 50000.0);
         Ok(Prediction {
             temperature: (1e6 / mired).clamp(2000.0, 50000.0),
@@ -349,6 +362,26 @@ impl Style {
             exposure: ev.clamp(-5.0, 5.0),
             contrast: a.get(3).map(|c| c.clamp(-100.0, 100.0)),
         })
+    }
+
+    /// The lowest and highest of the training photos' corrections `c` (0 mired change, 1 tint
+    /// change, 2 Exposure); None for a style without samples.
+    fn trained_range(&self, c: usize) -> Option<(f32, f32)> {
+        let mut seen = self.samples.iter().filter_map(|s| s.y.get(c).copied()).filter(|v| v.is_finite());
+        let first = seen.next()?;
+        Some(seen.fold((first, first), |(lo, hi), v| (lo.min(v), hi.max(v))))
+    }
+
+    /// How far a photo's furthest measurement is from the training photos' average, in their
+    /// standard deviations.
+    fn furthest(&self, f: &[f32]) -> f32 {
+        (0..f.len().min(self.mu.len())).map(|i| ((f[i] - self.mu[i]) / self.sd[i]).abs()).fold(0.0, f32::max)
+    }
+
+    /// Further out on some measurement than every training photo is.
+    fn unlike_any(&self, f: &[f32]) -> bool {
+        let most = self.samples.iter().filter(|s| s.f.len() == f.len()).map(|s| self.furthest(&s.f)).fold(0.0f32, f32::max);
+        most > 0.0 && self.furthest(f) > most
     }
 
     /// Number of different folders (shoots) it learned from.

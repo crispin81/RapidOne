@@ -12,6 +12,8 @@ interface Props {
   applyDisabled: boolean;
   /** "Applying style 12/120" or "Training: reading 40%" while running, else null. */
   progress: string | null;
+  /** How far it is (0-1), filling the button; null while a stage has no count. */
+  fraction?: number | null;
   onApply: (style: AutoStyle, scope: AutoStyleScope) => void;
   /** Train Style: a new style from folders of edited RAWs. */
   onTrain: (name: string, folders: string[]) => void;
@@ -39,6 +41,7 @@ export default function AutoStyleMenu({
   styles,
   applyDisabled,
   progress,
+  fraction = null,
   onApply,
   onTrain,
   onIncrease,
@@ -101,14 +104,22 @@ export default function AutoStyleMenu({
     <div className="topbar__menu" ref={ref}>
       <button
         type="button"
-        className={busy ? "is-on" : undefined}
+        className={busy ? "is-on autostyle__button--busy" : undefined}
         disabled={Boolean(busy)}
         onClick={() => setOpen((o) => !o)}
         title="Style: your look, plus white balance and exposure as you'd set them, learned from your own edits (and every photo levelled, if you like)"
         aria-label="Style"
       >
         {/* Its name shows (the other tools are icons only), as Export's does. */}
-        <Sparkles size={14} /> {busy ?? <span>Teach / apply look</span>}
+        {/* While it runs, the button fills left to right as the progress bars do (Chris, 12 Nov). */}
+        {busy && (
+          <span
+            className={`autostyle__fill${fraction == null ? " autostyle__fill--unknown" : ""}`}
+            style={fraction == null ? undefined : { width: `${Math.round(Math.min(1, Math.max(0, fraction)) * 100)}%` }}
+            aria-hidden="true"
+          />
+        )}
+        <Sparkles size={14} className="autostyle__label" /> <span className="autostyle__label">{busy ?? "Teach / apply look"}</span>
       </button>
       {open_ && (
         <div className="topbar__dropdown autostyle__menu" role="menu">
