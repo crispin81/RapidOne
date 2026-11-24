@@ -42,7 +42,7 @@ fn model_path() -> Option<PathBuf> {
 
 /// ONNX Runtime's environment, one for the app (the subject mask and AI
 /// noise reduction share it).
-pub(crate) fn ort_env() -> Option<&'static ort::environment::Environment> {
+pub fn ort_env() -> Option<&'static ort::environment::Environment> {
     static ENV: OnceLock<Option<ort::environment::Environment>> = OnceLock::new();
     ENV.get_or_init(|| ort::init().build().ok()).as_ref()
 }
@@ -54,6 +54,31 @@ static RESOURCE_MODELS: OnceLock<PathBuf> = OnceLock::new();
 
 pub fn set_resource_dir(dir: PathBuf) {
     let _ = RESOURCE_MODELS.set(dir.join("models"));
+}
+
+/// The user's own models folder: `models/` in the app's local data folder (Linux
+/// ~/.local/share/<app id>, Windows %LOCALAPPDATA%\<app id>, Mac ~/Library/Application
+/// Support/<app id>), for on-demand downloads (the High quality depth model, `hq.rs`; Remove
+/// GPU's RORem), set at start-up.
+static APP_MODELS: OnceLock<PathBuf> = OnceLock::new();
+
+pub fn set_app_models_dir(dir: PathBuf) {
+    let _ = APP_MODELS.set(dir.join("models"));
+}
+
+/// Where an on-demand model is downloaded to (None before the app has said).
+pub fn app_models_dir() -> Option<PathBuf> {
+    APP_MODELS.get().cloned()
+}
+
+/// The same folder, by the name Remove's RORem download uses.
+pub fn user_models_dir() -> Option<PathBuf> {
+    app_models_dir()
+}
+
+/// Sets that folder itself (no `models/` added): for tools such as examples/remover_download_check.rs.
+pub fn set_user_models_dir(dir: PathBuf) {
+    let _ = APP_MODELS.set(dir);
 }
 
 /// A model file in the models folder: `RAPIDONE_MODELS`, next to the app, the
@@ -68,6 +93,10 @@ pub(crate) fn model_dirs() -> Vec<PathBuf> {
     if let Ok(d) = std::env::var("RAPIDONE_MODELS") {
         dirs.push(PathBuf::from(d));
     }
+    // A model downloaded on demand (the High quality depth model) wins over a bundled one.
+    if let Some(d) = APP_MODELS.get() {
+        dirs.push(d.clone());
+    }
     if let Some(exe_dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.to_path_buf())) {
         dirs.push(exe_dir.join("models"));
     }
@@ -78,14 +107,13 @@ pub(crate) fn model_dirs() -> Vec<PathBuf> {
     dirs
 }
 
-fn session() -> Option<&'static Mutex<ort::session::Session>> {
+pub(crate) fn session() -> Option<&'static Mutex<ort::session::Session>> {
     static SESSION: OnceLock<Option<Mutex<ort::session::Session>>> = OnceLock::new();
     SESSION
         .get_or_init(|| {
             let path = model_path()?;
             let env = ort_env()?;
-            let session = ort::session::Session::builder(env).ok()?.commit_from_file(&path).ok()?;
-            Some(Mutex::new(session))
+            Some(Mutex::new(crate::ortgpu::build(env, &path, None)?))
         })
         .as_ref()
 }

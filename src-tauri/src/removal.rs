@@ -18,7 +18,7 @@
 //! Tested 15-16 Oct on two weddings: signs on
 //! brick, a sign behind a bride's head, fences, at 24 and 100 MP.
 
-use image::{Rgb, RgbImage};
+use image::{Rgb, RgbImage, RgbaImage};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -98,8 +98,10 @@ fn decode(rgb: [f32; 3], gain: f32) -> [f32; 3] {
 /// The crop around an area (pixels), `GROW` times its size, inside the photo.
 fn crop_around(area: [f32; 4], w: f32, h: f32) -> [f32; 4] {
     let (cx, cy) = ((area[0] + area[2]) / 2.0, (area[1] + area[3]) / 2.0);
-    let cw = ((area[2] - area[0]) * GROW).max(MIN_CROP).min(w);
-    let ch = ((area[3] - area[1]) * GROW).max(MIN_CROP).min(h);
+    // RAPIDONE_REMOVAL_CROP_GROW: another growth (testing).
+    let grow = std::env::var("RAPIDONE_REMOVAL_CROP_GROW").ok().and_then(|v| v.parse().ok()).unwrap_or(GROW);
+    let cw = ((area[2] - area[0]) * grow).max(MIN_CROP).min(w);
+    let ch = ((area[3] - area[1]) * grow).max(MIN_CROP).min(h);
     let left = (cx - cw / 2.0).clamp(0.0, w - cw);
     let top = (cy - ch / 2.0).clamp(0.0, h - ch);
     [left, top, left + cw, top + ch]
@@ -118,6 +120,12 @@ fn weight(x: f32, y: f32, grown: [f32; 4], fade: f32, crop: [f32; 4]) -> f32 {
     inside * (edge / 2.0).clamp(0.0, 1.0)
 }
 
+/// 0 at the crop's edge rising to 1 two pixels in (the patch ends there).
+fn edge_guard(x: f32, y: f32, crop: [f32; 4]) -> f32 {
+    let edge = (x - crop[0]).min(crop[2] - x).min(y - crop[1]).min(crop[3] - y);
+    (edge / 2.0).clamp(0.0, 1.0)
+}
+
 /// The area grown, and the fade width, both in pixels, for a crop and area in pixels.
 fn blend_shape(crop: [f32; 4], area: [f32; 4]) -> ([f32; 4], f32) {
     let fade = ((crop[2] - crop[0]).max(crop[3] - crop[1]) * 0.05).max(2.0);
@@ -126,13 +134,15 @@ fn blend_shape(crop: [f32; 4], area: [f32; 4]) -> ([f32; 4], f32) {
 }
 
 /// Patches, decoded once and kept while they're in use.
-fn patch(file: &str) -> Option<Arc<RgbImage>> {
-    static CACHE: Mutex<Vec<(String, Arc<RgbImage>)>> = Mutex::new(Vec::new());
+/// RGBA: the alpha says where the fill is (see `lite::composite`); patches saved before 21 Nov
+/// are RGB and read as opaque, as they were made.
+fn patch(file: &str) -> Option<Arc<RgbaImage>> {
+    static CACHE: Mutex<Vec<(String, Arc<RgbaImage>)>> = Mutex::new(Vec::new());
     let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((_, p)) = cache.iter().find(|(f, _)| f == file) {
         return Some(p.clone());
     }
-    let img = Arc::new(image::open(file).ok()?.to_rgb8());
+    let img = Arc::new(image::open(file).ok()?.to_rgba8());
     cache.push((file.to_string(), img.clone()));
     if cache.len() > 32 {
         cache.remove(0);
@@ -140,16 +150,22 @@ fn patch(file: &str) -> Option<Arc<RgbImage>> {
     Some(img)
 }
 
-/// Bilinear sample of the patch at (u, v), its own pixels.
-fn sample(p: &RgbImage, u: f32, v: f32) -> [f32; 3] {
+/// Bilinear sample of the patch at (u, v), its own pixels: colour 0..255 and alpha 0..1. The
+/// colour is weighted by alpha, so a fill's edge doesn't take in the colour beyond it.
+fn sample(p: &RgbaImage, u: f32, v: f32) -> ([f32; 3], f32) {
     let (w, h) = (p.width() as f32, p.height() as f32);
     let (u, v) = (u.clamp(0.0, w - 1.0), v.clamp(0.0, h - 1.0));
     let (x0, y0) = (u.floor() as u32, v.floor() as u32);
     let (x1, y1) = ((x0 + 1).min(p.width() - 1), (y0 + 1).min(p.height() - 1));
     let (fx, fy) = (u - x0 as f32, v - y0 as f32);
     let px = |x, y| p.get_pixel(x, y).0.map(|c| c as f32);
-    let (a, b, c, d) = (px(x0, y0), px(x1, y0), px(x0, y1), px(x1, y1));
-    std::array::from_fn(|k| (a[k] * (1.0 - fx) + b[k] * fx) * (1.0 - fy) + (c[k] * (1.0 - fx) + d[k] * fx) * fy)
+    let ws = [(1.0 - fx) * (1.0 - fy), fx * (1.0 - fy), (1.0 - fx) * fy, fx * fy];
+    let ps = [px(x0, y0), px(x1, y0), px(x0, y1), px(x1, y1)];
+    let alpha: f32 = ps.iter().zip(ws).map(|(p, w)| p[3] * w).sum();
+    if alpha <= 0.0 {
+        return ([0.0; 3], 0.0);
+    }
+    (std::array::from_fn(|k| ps.iter().zip(ws).map(|(p, w)| p[k] * p[3] * w).sum::<f32>() / alpha), alpha / 255.0)
 }
 
 /// The scene with its removals blended in; None when there are none (or no
@@ -215,6 +231,7 @@ pub fn apply(scene: &crate::pipeline::SceneImage, spots: &[Spot], frame: Option<
     let mut any = false;
     for r in removals {
         let Some(p) = patch(&r.file) else { continue };
+        let shaped = p.pixels().any(|q| q[3] < 255);
         any = true;
         let crop = [r.crop[0] * fw - ox, r.crop[1] * fh - oy, r.crop[2] * fw - ox, r.crop[3] * fh - oy];
         let area = [r.area[0] * fw - ox, r.area[1] * fh - oy, r.area[2] * fw - ox, r.area[3] * fh - oy];
@@ -227,20 +244,141 @@ pub fn apply(scene: &crate::pipeline::SceneImage, spots: &[Spot], frame: Option<
         if y0 >= y1 || x0 >= x1 {
             continue; // outside this part of the photo
         }
+        // How much of the patch each pixel of the crop takes.
+        let rw = x1 - x0;
+        let amount: Vec<f32> = (0..rw * (y1 - y0))
+            .into_par_iter()
+            .map(|i| {
+                let (xf, y) = ((x0 + i % rw) as f32 + 0.5, (y0 + i / rw) as f32 + 0.5);
+                // A patch with its own alpha (from 21 Nov) says where the fill goes; the box
+                // round the area is for older, opaque ones (it clipped a fill's edge straight).
+                let a = if shaped { edge_guard(xf, y, crop) } else { weight(xf, y, grown, fade, crop) };
+                if a <= 0.0 {
+                    return 0.0;
+                }
+                a * sample(&p, (xf - crop[0]) * sx - 0.5, (y - crop[1]) * sy - 0.5).1
+            })
+            .collect();
         out.px[y0 * width..y1 * width].par_chunks_mut(width).enumerate().for_each(|(i, row)| {
             let y = (y0 + i) as f32 + 0.5;
             for (x, px) in row.iter_mut().enumerate().take(x1).skip(x0) {
-                let xf = x as f32 + 0.5;
-                let a = weight(xf, y, grown, fade, crop);
+                let a = amount[i * rw + x - x0];
                 if a <= 0.0 {
                     continue;
                 }
-                let new = decode(sample(&p, (xf - crop[0]) * sx - 0.5, (y - crop[1]) * sy - 0.5), gain);
+                let xf = x as f32 + 0.5;
+                let (rgb, _) = sample(&p, (xf - crop[0]) * sx - 0.5, (y - crop[1]) * sy - 0.5);
+                let new = decode(rgb, gain);
                 *px = std::array::from_fn(|k| px[k] * (1.0 - a) + new[k] * a);
             }
         });
+        // GPU (Klein) fills carry the photo's own grain already.
+        if !r.file.ends_with("-max.png") {
+            add_grain(&mut out, [x0, y0, x1, y1], &amount, &r.file);
+        }
     }
     any.then_some(out)
+}
+
+/// The photo's own grain, put back on a fill. The models paint smooth (RORem at 512 px, LaMa
+/// at 512, both enlarged), so on a noisy photo a fill showed as a smooth patch with an edge
+/// where the grain stopped (21 Nov, P1368513, a night street). The grain is taken from the
+/// photo itself, not made up from its ISO: the fine detail (each pixel less the mean of its
+/// 3x3) of flat, untouched 32 px tiles of the crop, so it matches the camera, the ISO, any
+/// noise reduction and the size it's shown at. It's copied tile by tile onto the fill, each
+/// tile from one of those picked by a hash (the same every render), scaled for brightness
+/// (shot noise: by the square root), and by sqrt(a(2-a)) where the fill is blended with the
+/// photo (a), so the photo's grain and the copy add up to the same amount across the fade.
+fn add_grain(out: &mut crate::pipeline::SceneImage, rect: [usize; 4], amount: &[f32], file: &str) {
+    const T: usize = 32;
+    let [x0, y0, x1, y1] = rect;
+    let (rw, rh) = (x1 - x0, y1 - y0);
+    let (w, h) = (out.width, out.height);
+    if rw < 3 * T || rh < 3 * T {
+        return;
+    }
+    let lum = |p: [f32; 3]| (p[0] + p[1] + p[2]) / 3.0;
+    let img = &out.px;
+    // The fine detail at (x, y) of the photo: the pixel less the mean of its 3x3.
+    let detail = |x: usize, y: usize| -> [f32; 3] {
+        let (xa, xb, ya, yb) = (x.saturating_sub(1), (x + 1).min(w - 1), y.saturating_sub(1), (y + 1).min(h - 1));
+        let mut m = [0.0f32; 3];
+        for yy in ya..=yb {
+            for xx in xa..=xb {
+                let q = img[yy * w + xx];
+                (0..3).for_each(|k| m[k] += q[k]);
+            }
+        }
+        let n = ((yb - ya + 1) * (xb - xa + 1)) as f32;
+        let p = img[y * w + x];
+        std::array::from_fn(|k| p[k] - m[k] / n)
+    };
+    // Untouched tiles (none of the fill in them or next to them), scored by their fine detail
+    // for their brightness: the flattest 40% are grain, not the edges of things.
+    let tiles: Vec<(usize, usize)> = (0..rh / T).flat_map(|ty| (0..rw / T).map(move |tx| (tx, ty))).collect();
+    let mut flat: Vec<(f32, usize, usize)> = tiles
+        .par_iter()
+        .filter_map(|&(tx, ty)| {
+            let (ox, oy) = (tx * T, ty * T);
+            let (ya, yb, xa, xb) = (oy.saturating_sub(1), (oy + T + 1).min(rh), ox.saturating_sub(1), (ox + T + 1).min(rw));
+            if (ya..yb).any(|y| (xa..xb).any(|x| amount[y * rw + x] > 0.0)) {
+                return None;
+            }
+            let (mut d, mut l) = (0.0f32, 0.0f32);
+            for y in oy..oy + T {
+                for x in ox..ox + T {
+                    let (ax, ay) = (x0 + x, y0 + y);
+                    d += lum(detail(ax, ay)).abs();
+                    l += lum(img[ay * w + ax]);
+                }
+            }
+            (l > 0.0).then(|| (d / l.sqrt(), x0 + ox, y0 + oy))
+        })
+        .collect();
+    if flat.len() < 4 {
+        return; // too little of the photo round the fill to take grain from
+    }
+    flat.sort_by(|a, b| a.0.total_cmp(&b.0));
+    flat.truncate((flat.len() * 2 / 5).max(4));
+    // Each source tile's detail and smoothed brightness, copied out (the fill is written below).
+    let sources: Vec<(Vec<[f32; 3]>, Vec<f32>)> = flat
+        .par_iter()
+        .map(|&(_, sx, sy)| {
+            let mut g = Vec::with_capacity(T * T);
+            let mut b = Vec::with_capacity(T * T);
+            for y in sy..sy + T {
+                for x in sx..sx + T {
+                    let d = detail(x, y);
+                    g.push(d);
+                    b.push(lum(img[y * w + x]) - lum(d));
+                }
+            }
+            (g, b)
+        })
+        .collect();
+    let seed = file.bytes().fold(0x811c9dc5u32, |h, b| (h ^ b as u32).wrapping_mul(0x01000193));
+    let pick = |tx: usize, ty: usize| -> usize {
+        let mut v = seed ^ (tx as u32).wrapping_mul(0x9e3779b1) ^ (ty as u32).wrapping_mul(0x85ebca77);
+        v ^= v >> 15;
+        v = v.wrapping_mul(0x2c1b3c6d);
+        v ^= v >> 12;
+        v as usize % sources.len()
+    };
+    out.px[y0 * w..y1 * w].par_chunks_mut(w).enumerate().for_each(|(i, row)| {
+        for x in x0..x1 {
+            let a = amount[i * rw + x - x0];
+            if a <= 0.0 {
+                continue;
+            }
+            let (lx, ly) = (x - x0, i);
+            let (g, base) = &sources[pick(lx / T, ly / T)];
+            let j = (ly % T) * T + lx % T;
+            let here = lum(row[x]);
+            let scale = if base[j] > 1e-6 && here > 0.0 { (here / base[j]).sqrt().clamp(0.25, 4.0) } else { 0.0 };
+            let k = (a * (2.0 - a)).sqrt() * scale;
+            row[x] = std::array::from_fn(|c| (row[x][c] + g[j][c] * k).max(0.0));
+        }
+    });
 }
 
 /// Where a photo's removal patches go: `sidecars/removals/` beside it.
@@ -275,8 +413,193 @@ fn prompt(what: &str) -> String {
 
 /// The model's working size (multiples of 16, long edge SIDE) for a w x h picture.
 fn model_size(w: f32, h: f32) -> (u32, u32) {
-    let s = SIDE as f32 / w.max(h);
+    model_size_side(w, h, SIDE)
+}
+
+/// `model_size` for another long edge.
+fn model_size_side(w: f32, h: f32, side: u32) -> (u32, u32) {
+    let s = side as f32 / w.max(h);
     (((w * s / 16.0).round() * 16.0).max(16.0) as u32, ((h * s / 16.0).round() * 16.0).max(16.0) as u32)
+}
+
+/// The hole in the model's picture (mw x mh) of `crop`: the outline's pixels, or without one the
+/// area's box grown 12%.
+fn hole_in(mw: u32, mh: u32, outline: Option<&image::GrayImage>, crop: [f32; 4], area_px: [f32; 4], w: f32, h: f32) -> Vec<bool> {
+    match outline {
+        Some(mask) => outline_hole(mw, mh, mask, crop, w, h),
+        None => {
+            let (cw, ch) = (crop[2] - crop[0], crop[3] - crop[1]);
+            let (sx, sy) = (mw as f32 / cw, mh as f32 / ch);
+            let (aw, ah) = (area_px[2] - area_px[0], area_px[3] - area_px[1]);
+            let g = [
+                (area_px[0] - aw * 0.12 - crop[0]) * sx,
+                (area_px[1] - ah * 0.12 - crop[1]) * sy,
+                (area_px[2] + aw * 0.12 - crop[0]) * sx,
+                (area_px[3] + ah * 0.12 - crop[1]) * sy,
+            ];
+            (0..(mw * mh) as usize)
+                .map(|i| {
+                    let (x, y) = ((i % mw as usize) as f32 + 0.5, (i / mw as usize) as f32 + 0.5);
+                    x >= g[0] && x <= g[2] && y >= g[1] && y <= g[3]
+                })
+                .collect()
+        }
+    }
+}
+
+/// How much structure there is round the hole, in `pic` (8-bit): the mean absolute difference
+/// between a 5x5 and a 21x21 neighbourhood's mean (structure, with the grain averaged out, so a
+/// dark noisy backdrop still reads plain), over a ring from 1% to 6% of the long edge outside the
+/// hole, as a share of the ring's brightness. A plain studio backdrop or clear sky reads near 0;
+/// grass, paving or foliage far higher (see `plain_backdrop`).
+pub(crate) fn ring_detail(pic: &RgbImage, hole: &[bool]) -> f32 {
+    let (w, h) = (pic.width() as usize, pic.height() as usize);
+    let long = w.max(h) as f32;
+    let outer = dilate(hole, w, h, (long * 0.06).ceil() as usize);
+    let inner = dilate(hole, w, h, (long * 0.01).ceil() as usize + 1);
+    let lum: Vec<f32> = pic.pixels().map(|p| 0.299 * p[0] as f32 + 0.587 * p[1] as f32 + 0.114 * p[2] as f32).collect();
+    let mut ii = vec![0f64; (w + 1) * (h + 1)];
+    for y in 0..h {
+        let mut row = 0f64;
+        for x in 0..w {
+            row += lum[y * w + x] as f64;
+            ii[(y + 1) * (w + 1) + x + 1] = ii[y * (w + 1) + x + 1] + row;
+        }
+    }
+    let mean = |x: usize, y: usize, r: usize| -> f64 {
+        let (x0, y0, x1, y1) = (x.saturating_sub(r), y.saturating_sub(r), (x + r + 1).min(w), (y + r + 1).min(h));
+        (ii[y1 * (w + 1) + x1] - ii[y0 * (w + 1) + x1] - ii[y1 * (w + 1) + x0] + ii[y0 * (w + 1) + x0]) / ((x1 - x0) * (y1 - y0)) as f64
+    };
+    let (mut dsum, mut lsum, mut n) = (0f64, 0f64, 0f64);
+    for y in 0..h {
+        for x in 0..w {
+            let i = y * w + x;
+            if !outer[i] || inner[i] {
+                continue;
+            }
+            dsum += (mean(x, y, 2) - mean(x, y, 10)).abs();
+            lsum += lum[i] as f64;
+            n += 1.0;
+        }
+    }
+    if n < 1.0 || lsum <= 0.0 {
+        return f32::MAX;
+    }
+    (dsum / lsum) as f32
+}
+
+/// Below this `ring_detail` the background round the hole is a plain backdrop (21 Nov: studio
+/// light 0.0007, studio dark 0.0028; bluebells 0.020, moor 0.037, night street 0.086). Was 0.008
+/// until 24 Nov: a windsurfer's sail against a soft out-of-focus sea (_DSC3995) read 0.0075 and was
+/// smeared by the smooth fill instead of going to the AI; 0.0045 sits about 1.6x from both.
+const PLAIN: f32 = 0.0045;
+
+/// A plain backdrop filled with no model: its light carried smoothly in from all round the hole
+/// (pull-push: each coarser level the mean of what's known, then filled back down, then smoothed),
+/// so a studio backdrop's gradient continues. The photo's grain is added when the patch is applied
+/// (`add_grain`). Every AI fill failed here: none would empty the frame of a studio subject (Klein
+/// kept the grey shape or the person, LaMa smeared a column of hair; Chris, 21 Nov).
+fn smooth_fill(pic: &RgbImage, hole: &[bool]) -> RgbImage {
+    let (w, h) = (pic.width() as usize, pic.height() as usize);
+    let mut img: Vec<[f32; 3]> = pic.pixels().map(|p| [p[0] as f32, p[1] as f32, p[2] as f32]).collect();
+    let known: Vec<f32> = hole.iter().map(|&b| if b { 0.0 } else { 1.0 }).collect();
+    fn pull_push(img: &[[f32; 3]], known: &[f32], w: usize, h: usize) -> Vec<[f32; 3]> {
+        if w <= 2 || h <= 2 {
+            let (mut s, mut n) = ([0f32; 3], 0f32);
+            for (p, &k) in img.iter().zip(known) {
+                (0..3).for_each(|c| s[c] += p[c] * k);
+                n += k;
+            }
+            let m = if n > 0.0 { s.map(|v| v / n) } else { [128.0; 3] };
+            return vec![m; w * h];
+        }
+        let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
+        let mut ci = vec![[0f32; 3]; cw * ch];
+        let mut ck = vec![0f32; cw * ch];
+        for y in 0..h {
+            for x in 0..w {
+                let (i, j) = (y * w + x, (y / 2) * cw + x / 2);
+                (0..3).for_each(|c| ci[j][c] += img[i][c] * known[i]);
+                ck[j] += known[i];
+            }
+        }
+        for j in 0..cw * ch {
+            if ck[j] > 0.0 {
+                ci[j] = ci[j].map(|v| v / ck[j]);
+            }
+            ck[j] = ck[j].min(1.0);
+        }
+        let coarse = pull_push(&ci, &ck, cw, ch);
+        (0..w * h)
+            .map(|i| {
+                let (x, y) = (i % w, i / w);
+                // Bilinear from the coarser level.
+                let (fx, fy) = ((x as f32 + 0.5) / 2.0 - 0.5, (y as f32 + 0.5) / 2.0 - 0.5);
+                let (x0, y0) = (fx.floor().max(0.0) as usize, fy.floor().max(0.0) as usize);
+                let (x1, y1) = ((x0 + 1).min(cw - 1), (y0 + 1).min(ch - 1));
+                let (tx, ty) = ((fx - x0 as f32).clamp(0.0, 1.0), (fy - y0 as f32).clamp(0.0, 1.0));
+                let up: [f32; 3] = std::array::from_fn(|c| {
+                    let a = coarse[y0 * cw + x0][c] * (1.0 - tx) + coarse[y0 * cw + x1][c] * tx;
+                    let b = coarse[y1 * cw + x0][c] * (1.0 - tx) + coarse[y1 * cw + x1][c] * tx;
+                    a * (1.0 - ty) + b * ty
+                });
+                let k = known[i];
+                std::array::from_fn(|c| img[i][c] * k + up[c] * (1.0 - k))
+            })
+            .collect()
+    }
+    img = pull_push(&img, &known, w, h);
+    // Smoothed inside the hole (a box of 1.5% of the long edge, a few passes), the rest as shot.
+    let r = ((w.max(h) as f32) * 0.015).ceil() as usize;
+    for _ in 0..3 {
+        let prev = img.clone();
+        let blurred: Vec<[f32; 3]> = {
+            let pass = |src: &[[f32; 3]], horiz: bool| -> Vec<[f32; 3]> {
+                let (n, m) = if horiz { (h, w) } else { (w, h) };
+                let mut out = vec![[0f32; 3]; w * h];
+                for line in 0..n {
+                    let at = |k: usize| if horiz { line * w + k } else { k * w + line };
+                    let mut pre = vec![[0f64; 3]; m + 1];
+                    for k in 0..m {
+                        pre[k + 1] = std::array::from_fn(|c| pre[k][c] + src[at(k)][c] as f64);
+                    }
+                    for k in 0..m {
+                        let (a, b) = (k.saturating_sub(r), (k + r + 1).min(m));
+                        out[at(k)] = std::array::from_fn(|c| ((pre[b][c] - pre[a][c]) / (b - a) as f64) as f32);
+                    }
+                }
+                out
+            };
+            pass(&pass(&prev, true), false)
+        };
+        for i in 0..w * h {
+            if hole[i] {
+                img[i] = blurred[i];
+            }
+        }
+    }
+    RgbImage::from_fn(w as u32, h as u32, |x, y| Rgb(img[y as usize * w + x as usize].map(|v| v.round().clamp(0.0, 255.0) as u8)))
+}
+
+/// GPU's fill of `crop`, blended (RGBA patch), at `gpumax::work_size` (1408 px, area capped). No
+/// retrying smaller after running out of memory: a WebGPU failure leaves ONNX Runtime's graphics
+/// device unusable until RapidOne restarts (21 Nov: 1408, 1024 and 768 all failed in turn), so the
+/// size is chosen up front. The hole is grown 2% so Klein doesn't see the object's edges; people the
+/// outline protects are never greyed.
+#[allow(clippy::too_many_arguments)]
+fn max_fill(img: &crate::pipeline::SceneImage, crop: [f32; 4], ev: f32, outline: Option<&image::GrayImage>, area_px: [f32; 4], w: f32, h: f32, seed: u32) -> Result<RgbaImage, String> {
+    let (cw, ch) = (crop[2] - crop[0], crop[3] - crop[1]);
+    let (mw, mh) = crate::gpumax::work_size(cw, ch);
+    let small = picture(img, crop, mw, mh, ev.exp2());
+    let hole = hole_in(mw, mh, outline, crop, area_px, w, h);
+    let protect = outline.map(|m| outline_where(mw, mh, m, crop, w, h, |v| v == crate::lite::PROTECT)).filter(|p| p.iter().any(|&b| b));
+    let grow = ((mw.max(mh) as f32) * 0.02).ceil() as usize + 2;
+    let mut grown = dilate(&hole, mw as usize, mh as usize, grow);
+    if let Some(p) = &protect {
+        grown.iter_mut().zip(p).for_each(|(g, &p)| *g &= !p);
+    }
+    let out = crate::gpumax::fill(&small, &grown, seed)?;
+    Ok(crate::gpumax::composite_changed(&small, &out, &grown, protect.as_deref()))
 }
 
 /// The part of the scene in `crop` (pixels) as an ordinary picture (the scene
@@ -317,7 +640,7 @@ fn brightness(scene: &crate::develop::Scene) -> f32 {
 /// `seed` picks the model's version (0 first; Try again asks for the next).
 pub fn create(photo: &Path, area: [f32; 4], what: &str, outline: Option<&Path>, seed: u32) -> Result<Removal, String> {
     let whole = area[0] <= 0.001 && area[1] <= 0.001 && area[2] >= 0.999 && area[3] >= 0.999;
-    if whole && outline.is_none() && lite() {
+    if whole && outline.is_none() && lite_tools() {
         return Err(LITE_WORDS.into());
     }
     let scene = crate::develop::develop_scene_export(photo, 100_000)?;
@@ -385,9 +708,16 @@ static MODE_CHOSEN: Mutex<Option<Mode>> = Mutex::new(None);
 
 const LITE_WORDS: &str = "Finding things by name needs Grounding DINO (Lite) or SAM 3. Draw a box round it, or paint over it.";
 
-/// Which removers are installed: (Large, Medium, Lite).
+/// Whether RORem may be used: off since 21 Nov (Chris: GPU is Klein 4B, `gpumax`; RORem's code is kept).
+/// RAPIDONE_ROREM=1 turns it back on (testing).
+pub fn rorem_enabled() -> bool {
+    std::env::var("RAPIDONE_ROREM").as_deref() == Ok("1")
+}
+
+/// Which removers are installed: (Large, Medium, Lite). Medium is GPU (Smarter): Klein 4B.
 pub fn installed() -> (bool, bool, bool) {
-    (crate::klein::available(), crate::klein::rorem_available(), crate::lite::available())
+    let rorem = rorem_enabled() && (crate::rorem::available() || crate::klein::rorem_available());
+    (crate::klein::available(), crate::gpumax::available() || rorem, crate::lite::available())
 }
 
 /// The remover in use: the one chosen if installed, else Lite (it ships with
@@ -403,14 +733,29 @@ pub fn mode() -> Mode {
     chosen.filter(|&m| ok(m)).or_else(|| [Mode::Lite, Mode::Medium, Mode::Large].into_iter().find(|&m| ok(m))).unwrap_or(Mode::Lite)
 }
 
-/// The Remove bar's switch.
+/// The Remove bar's switch (CPU = Lite, GPU = Medium). Leaving GPU frees
+/// RORem's graphics memory (~3.6 GB at 1024 px) for Denoise, masks and the renderer.
 pub fn set_mode(m: Mode) {
     *MODE_CHOSEN.lock().unwrap_or_else(|e| e.into_inner()) = Some(m);
+    eprintln!("removal: mode {m:?}");
+    if m != Mode::Medium {
+        crate::rorem::unload();
+        crate::gpumax::unload();
+    } else if rorem_enabled() && crate::rorem::held() {
+        crate::rorem::preload();
+    }
 }
 
 /// Whether Lite is the remover in use.
 pub fn lite() -> bool {
     mode() == Mode::Lite
+}
+
+/// Whether outlines and finding by words use Lite's ONNX tools (MobileSAM,
+/// Grounding DINO): in Lite ("CPU"), and in Medium ("GPU") when RORem runs
+/// through ONNX Runtime, which needs no Python and so has no SAM 3.
+fn lite_tools() -> bool {
+    lite() || (mode() == Mode::Medium && (crate::gpumax::available() || (rorem_enabled() && crate::rorem::available())))
 }
 
 /// Lite: MobileSAM's outline of what's in `bbox` (pixels of the find
@@ -461,7 +806,7 @@ pub fn prepare(photo: &Path) -> Result<(), String> {
         return Ok(());
     }
     let (pic, _, _) = find_picture(photo)?;
-    if lite() {
+    if lite_tools() {
         return crate::lite::prepare(&pic);
     }
     crate::klein::prepare(&pic)
@@ -470,7 +815,7 @@ pub fn prepare(photo: &Path) -> Result<(), String> {
 /// Whether drawn boxes are outlined first (SAM 3; Lite: MobileSAM), and with
 /// Full, objects found by words.
 pub fn can_find() -> bool {
-    if lite() {
+    if lite_tools() {
         crate::lite::can_outline()
     } else {
         crate::klein::sam_available()
@@ -487,7 +832,7 @@ pub fn find(photo: &Path, words: &str, area: Option<[f32; 4]>) -> Result<Vec<Out
     }
     let (input, w, h) = find_picture(photo)?;
     let bbox = area.map(|a| [a[0] * w, a[1] * h, a[2] * w, a[3] * h]);
-    if lite() {
+    if lite_tools() {
         // Lite: a drawn box outlined by MobileSAM; words found by Grounding
         // DINO, each match then outlined by MobileSAM.
         let boxes: Vec<([f32; 4], f32)> = match bbox {
@@ -549,7 +894,7 @@ fn outline_in_box(photo: &Path, scene: &crate::develop::Scene, area_px: [f32; 4]
     }
     let (input, pw, _) = find_picture(photo).ok()?;
     let s = pw / scene.image.width as f32;
-    if lite() {
+    if lite_tools() {
         let b = [area_px[0] * s, area_px[1] * s, area_px[2] * s, area_px[3] * s];
         return lite_outline(photo, &input, b, 0).ok().flatten().map(|(f, _)| f);
     }
@@ -593,26 +938,73 @@ fn boxed(photo: &Path, scene: &crate::develop::Scene, area: [f32; 4], what: &str
         let outline_img = outline.as_ref().and_then(|m| image::open(m).ok()).map(|m| m.to_luma8());
         // Lite's outlines mark people next to the object, which the fill keeps.
         let protect = outline_img.as_ref().map(|m| outline_where(mw, mh, m, crop, w, h, |v| v == crate::lite::PROTECT)).filter(|p| p.iter().any(|&b| b));
-        let hole = match outline_img {
-            Some(mask) => outline_hole(mw, mh, &mask, crop, w, h),
-            None => {
-                let g = [
-                    (area_px[0] - aw * 0.12 - crop[0]) * sx,
-                    (area_px[1] - ah * 0.12 - crop[1]) * sy,
-                    (area_px[2] + aw * 0.12 - crop[0]) * sx,
-                    (area_px[3] + ah * 0.12 - crop[1]) * sy,
-                ];
-                (0..(mw * mh) as usize)
-                    .map(|i| {
-                        let (x, y) = ((i % mw as usize) as f32 + 0.5, (i / mw as usize) as f32 + 0.5);
-                        x >= g[0] && x <= g[2] && y >= g[1] && y <= g[3]
-                    })
-                    .collect()
-            }
-        };
+        let _ = (sx, sy, aw, ah);
+        let hole = hole_in(mw, mh, outline_img.as_ref(), crop, area_px, w, h);
         let (input, output) = run_files(photo)?;
+        // A plain backdrop round the hole (studio, clear sky): filled with no model, CPU or GPU.
+        let detail = ring_detail(&small, &hole);
+        eprintln!("removal: detail round the hole {detail:.4}{}", if detail < PLAIN { " (plain backdrop: smooth fill)" } else { "" });
+        if detail < PLAIN && std::env::var("RAPIDONE_NO_PLAIN").is_err() {
+            let long = mw.max(mh) as f32;
+            let grow = (long * 0.02).ceil() as usize + 2;
+            let mut core = hole.clone();
+            let mut grown = dilate(&hole, mw as usize, mh as usize, grow);
+            if let Some(p) = &protect {
+                grown.iter_mut().zip(p).for_each(|(g, &p)| *g &= !p);
+                core.iter_mut().zip(p).for_each(|(g, &p)| *g &= !p);
+            }
+            let out = smooth_fill(&small, &grown);
+            let filled = crate::lite::composite_ramp(&small, &out, &core, protect.as_deref(), long * 0.02 + 2.0, long * 0.04 + 2.0);
+            filled.save(&output).map_err(|e| e.to_string())?;
+            if let Some(m) = outline.as_ref() {
+                let _ = std::fs::remove_file(m);
+            }
+            let _ = &input;
+            return Ok(Removal { file: output.to_string_lossy().replace('\\', "/"), crop: [crop[0] / w, crop[1] / h, crop[2] / w, crop[3] / h], area, ev });
+        }
+        // GPU (21 Nov): FLUX.2 Klein 4B + remove LoRA in this process (`gpumax`), when installed;
+        // RORem below is kept but no longer offered (Chris). Its own size (1408 px), its own blend
+        // (`gpumax::composite_changed`); patches named "-max" (`apply` adds no grain to them).
+        if !lite() && crate::gpumax::available() {
+            let filled = max_fill(img, crop, ev, outline_img.as_ref(), area_px, w, h, seed)?;
+            let stem = output.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+            let output = output.with_file_name(format!("{stem}-max.png"));
+            filled.save(&output).map_err(|e| e.to_string())?;
+            if let Some(m) = outline.as_ref() {
+                let _ = std::fs::remove_file(m);
+            }
+            return Ok(Removal { file: output.to_string_lossy().replace('\\', "/"), crop: [crop[0] / w, crop[1] / h, crop[2] / w, crop[3] / h], area, ev });
+        }
         let filled = if lite() {
             crate::lite::fill(&small, &hole, protect.as_deref(), seed)?
+        } else if !rorem_enabled() {
+            return Err("GPU (Smarter) isn't installed on this computer. Switch Remove to CPU.".into());
+        } else if crate::rorem::available() {
+            // GPU: RORem through ONNX Runtime, in this process. The hole grown 3.5%
+            // of the crop (RAPIDONE_ROREM_GROW, percent, for tests). 20 Nov, P1368513
+            // (a couple removed from a night street): at 2% the edges of their dark
+            // suits stayed outside the hole and RORem carried them in as a dark ghost
+            // with a seam along the outline; at 5% it caught the bollard beside them
+            // (half of it went) and left a light streak; 3.5% kept the bollard whole
+            // and the ghost mostly gone. Blended over half the growth: no hard edge.
+            // 21 Nov: blended by distance from the object, fully out to 2% (the suits' edges)
+            // and fading to nothing at 5% (`lite::composite_ramp`), not over the grown hole's
+            // edge, where the alpha jumped and left a line on the floor. RAPIDONE_ROREM_FULL /
+            // _ZERO (percent) for tests.
+            let env = |k: &str, d: f32| std::env::var(k).ok().and_then(|v| v.parse().ok()).unwrap_or(d);
+            let pct = env("RAPIDONE_ROREM_GROW", 3.5);
+            let long = mw.max(mh) as f32;
+            let grow = (long * pct / 100.0).ceil() as usize + 2;
+            let mut core = hole.clone();
+            let mut hole = dilate(&hole, mw as usize, mh as usize, grow);
+            if let Some(p) = &protect {
+                hole.iter_mut().zip(p).for_each(|(h, &p)| *h &= !p);
+                core.iter_mut().zip(p).for_each(|(h, &p)| *h &= !p);
+            }
+            let out = crate::rorem::fill(&small, &hole, seed, |_, _| {})?;
+            let full = long * env("RAPIDONE_ROREM_FULL", 2.0) / 100.0 + 2.0;
+            let zero = long * env("RAPIDONE_ROREM_ZERO", 5.0) / 100.0 + 2.0;
+            crate::lite::composite_ramp(&small, &out, &core, protect.as_deref(), full, zero)
         } else {
             // RORem: the hole grown ~2% (edges, shadows), as a mask beside the picture.
             let grow = ((mw.max(mh) as f32) * 0.02).ceil() as usize + 2;
@@ -866,6 +1258,11 @@ fn box_blur(src: &[f32], w: usize, h: usize, r: usize) -> Vec<f32> {
 }
 
 /// A mask grown by r pixels (square).
+/// `dilate` for the examples (testing).
+pub fn dilate_pub(mask: &[bool], w: usize, h: usize, r: usize) -> Vec<bool> {
+    dilate(mask, w, h, r)
+}
+
 pub(crate) fn dilate(mask: &[bool], w: usize, h: usize, r: usize) -> Vec<bool> {
     let mut rows = vec![false; mask.len()];
     for y in 0..h {

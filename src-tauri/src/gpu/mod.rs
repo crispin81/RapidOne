@@ -215,6 +215,10 @@ pub fn render(job: &Job, pass: Pass, toned: Option<&[[f32; 3]]>) -> Option<Outpu
     if mode() == RenderMode::Cpu || pass == Pass::Amounts {
         return None;
     }
+    // Bokeh, Mist and Relight are whole-image scene-light passes on the CPU (phases 2-4; phase 5
+    // ports them), run before this on the scene light and kept between renders
+    // (`commands::creative_cached`); the tone and finish passes after them run here as for any
+    // photo, so RAW's sliders on a Creative photo are as quick as on any other (24 Nov, Chris).
     if let Some(why) = job_unsupported(job) {
         note_cpu(why);
         return None;
@@ -1134,6 +1138,33 @@ mod tests {
             Gradient { kind: Kind::Radial, centre: [0.55, 0.5], rx: 0.3, ry: 0.25, feather: 50.0, texture: -30.0, clarity: -35.0, dehaze: -20.0, ..Default::default() },
         ];
         cases.push(RenderSettings { gradients: masks, ..Default::default() });
+        // Depth masks: the band is a map in `lut` too (as a subject mask is), as its own layer or a
+        // part taken away, so the CPU and GPU agree on it.
+        use crate::gradient::Part;
+        let control = crate::gradient::Grid { w: 64, h: 64, data: (0..64 * 64).map(|i| (i % 64) as f32 / 63.0).collect() };
+        // With the two surfaces where the map jumps (phase 1c), so the CPU and GPU agree on those too.
+        let edges = crate::edges::edges(&control, None, None, 2);
+        let depth = std::sync::Arc::new(crate::scene::Refined {
+            control: std::sync::Arc::new(control),
+            sky: None,
+            edges: Some(std::sync::Arc::new(edges)),
+            anchors: None,
+            focal_px: None,
+            ground: None,
+            normals: None,
+        });
+        let depth_masks = vec![
+            Gradient { kind: Kind::Depth, near: 0.9, far: 0.4, fade: 0.1, exposure: 0.8, invert: false, ..Default::default() },
+            Gradient {
+                kind: Kind::Linear,
+                full: [0.0, 0.5],
+                zero: [0.9, 0.5],
+                contrast: 35.0,
+                parts: vec![Part { subtract: true, shape: Gradient { kind: Kind::Depth, near: 0.7, far: 0.3, fade: 0.2, ..Default::default() } }],
+                ..Default::default()
+            },
+        ];
+        cases.push(RenderSettings { gradients: depth_masks, depth_map: Some(depth), ..Default::default() });
         for s in cases {
             set_thread_mode(Some(RenderMode::Cpu));
             let cpu = render(&scene, &s, 0.0, None);

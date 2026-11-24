@@ -25,6 +25,7 @@ Part of a family of apps by Chris Cork Photography: RapidOne brings
 
 **[⬇ Download the latest version](https://github.com/crispin81/RapidOne/releases/latest)**
 
+- **2026-11-24 (v1.3.0, all desktop platforms):** A new **Creative** panel in Edit works out the 3D shape of the scene from the photo: see it as a point cloud in the Depth Scope, add lens-aware **Bokeh**, depth and ground **Fog**, and **Relight** with studio lights (softbox, umbrella, beauty dish, strip box and more) or the sun and moon placed in a 3D view. **Remove: GPU (Smarter)** rebuilds what was behind an object on your graphics card (a one-time download: 4.4 GB on Windows and Linux, 7.9 GB on a Mac). Numbered pins undo one removal at a time. **Retouch: Hair remove (beta)** takes out stray hairs. Kodak DCR RAWs open, and TIFF export is tagged sRGB at 300 ppi with the camera's details. Fixes: straightening turning some straight photos, and filtering the filmstrip sending Edit back home.
 - **2026-11-13 (v1.2.2, all desktop platforms):** People Mask: one button finds the people in every photo in a folder, and their Exposure and Contrast sit in the main panel (Shift+P). Clipped highlights such as stage lights and specular highlights are rebuilt from the colour round them instead of turning into hard white patches. Fixes: Apply Style freezing on big folders, photos turning black at very high Kelvin with a tint, styles overshooting on photos unlike any they learned from, Cull on folders of 2000+ photos, a crash on closing with NVIDIA on Linux, and straightening that over-rotated portraits. Previews keep coming while a style trains, and the Style and People mask buttons fill as they work. ⚠️ **Linux AppImage needs glibc 2.39 or newer.** That's Ubuntu 24.04+, Linux Mint 22+, Fedora 40+, Debian 13+, or an up-to-date Arch or Manjaro. To check yours, open a terminal and run `ldd --version`. On older systems the AppImage won't start, and you'll see an error mentioning `GLIBC_2.38`, `GLIBC_2.39` or `GLIBCXX_3.4.32`.
 - **2026-11-01 (v1.2.1, all desktop platforms):** Windows, Mac and Linux move to 1.2.1 together. Fixes a hang in sharp previews, AI Noise running again on every render when zoomed in, white patches in bright skies, and a stretch on crop and on coming back to Edit. Sharper drags when zoomed in, Retouch keeps its zoom while preparing, and both Windows installers include DirectML.dll.
 - **2026-11-01 (v1.2.0, Windows and Mac):** Colour noise reduction, on by default for RAW files, with its slider behind a Legacy noise button. A white balance eyedropper with an R G B readout, and Defringe with its own eyedropper. Fit renders at your screen's resolution, Sharpen is refitted and goes below 0 to soften, panning is sharper, and the home screen says when an update is out. Linux 1.2.0 to follow.
@@ -158,8 +159,11 @@ Three tabs, one folder of photos:
     grading wheels, sharpening, vignette and grain.
   - Crop and straighten, auto level and keystone, lens corrections (Lensfun).
   - Masks: Subject (automatic), Brush, Linear and Radial, combined and inverted.
-  - Erase: drag a box or paint over an object to remove it, or find it by name.
-    Patch: Heal or Clone, Photoshop-style.
+  - Erase: drag a box or paint over an object to remove it, or find it by name. GPU (Smarter)
+    rebuilds what was behind it on your graphics card (a one-time download). Patch: Heal or
+    Clone, Photoshop-style.
+  - Creative: the scene's 3D shape from the photo itself, for Bokeh (lens blur), Fog and
+    Relight (studio lights, sun and moon placed in a 3D view).
   - AI Denoise, also "Denoise all" for every photo above a chosen ISO.
   - Lightroom compatible: reads Lightroom and Aftershoot XMP edits, including crops and
     gradients, and uses Adobe's camera profiles if you add your own.
@@ -168,7 +172,8 @@ Three tabs, one folder of photos:
     copy/paste and before/after.
   - Export to JPEG or 16-bit TIFF, full size or scaled, with export presets.
 - **Retouch**: Evoto-style AI portrait retouching (from RapidRetouch): skin, blemishes,
-  wrinkles, eyes, teeth, backdrop, dodge & burn and more, as sliders on the edited photo.
+  wrinkles, eyes, teeth, backdrop, dodge & burn, stray hair removal (beta) and more, as
+  sliders on the edited photo.
 
 Photos never leave your computer.
 
@@ -177,7 +182,6 @@ Photos never leave your computer.
 **Coming next**
 
 - Multi-face detection in Retouch
-- Stray hair removal
 - Liquify
 - Plugins: add your own tools
 
@@ -200,6 +204,10 @@ Only permissively licensed models are used. Edit's models come in the download.
 | MobileSAM | Outlining objects to erase | MIT |
 | Grounding DINO tiny | Finding objects by name | Apache-2.0 |
 | RapidOne denoise (distilled from SCUNet) | AI Denoise | Apache-2.0 |
+| MoGe-2 (ViT-S, ViT-B) | Creative: the scene's 3D shape | MIT (DINOv2 backbone: Apache-2.0) |
+| Depth Anything V2 Small | Creative: depth | Apache-2.0 |
+| Depth Anything 3 Mono-Large (optional download) | Creative: High quality depth | Apache-2.0 |
+| FLUX.2 Klein 4B + object-remove LoRA (download on first use) | Erase: GPU (Smarter) | Apache-2.0 |
 
 Retouch's models are listed in [RapidRetouch](https://github.com/crispin81/RapidRetouch#ai-models).
 

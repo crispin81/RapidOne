@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
-import { Brush, Eraser, Loader2, RefreshCw, SquareDashed } from "lucide-react";
-import type { Outline, RemovalMode, RemovalModes } from "../api";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { Brush, Eraser, Loader2, RefreshCw, SquareDashed, X } from "lucide-react";
+import { cancelGpuRemoverDownload, getGpuRemoverDownload, startGpuRemoverDownload, subscribeGpuRemoverDownload, type Outline, type RemovalMode, type RemovalModes } from "../api";
 import { BarGrip, useFloatingBar } from "../floatingBar";
+import { IS_MAC } from "../macKeys";
 import HSlider from "./HSlider";
 
 type Area = [number, number, number, number];
@@ -32,9 +33,16 @@ interface Props {
   onDone: () => void;
   /** Start with the whole photo selected (Ctrl+E): say what to remove, Enter. */
   startWhole?: boolean;
+  /** This photo's removals (not patches), in the order made: a pin on each undoes just that one. */
+  removed?: { file: string; area: Area }[];
+  onUndoOne?: (file: string) => void;
 }
 
 const MIN_PX = 6; // a smaller drag is a click, not a box
+/** What GPU (Smarter) needs. On a Mac it runs on the shared memory (fp16 model, about 9 GB in use). */
+const GPU_NEEDS = IS_MAC
+  ? "On a Mac it uses about 9 GB of memory and takes up to a minute (less on newer Macs)"
+  : "Needs at least 8 GB of graphics memory; 12 GB or more for full detail";
 
 /** A brush stroke: points as fractions of the photo, radius as a fraction of its width. */
 interface Stroke {
@@ -43,6 +51,11 @@ interface Stroke {
 }
 
 /** Draws strokes onto a canvas the photo's size (w x h), in `colour`. */
+/** Bytes as "1.2 GB", for the GPU (Smarter) download's progress. */
+function gbOf(bytes: number): string {
+  return `${(bytes / 1e9).toFixed(1)} GB`;
+}
+
 function paint(ctx: CanvasRenderingContext2D, strokes: Stroke[], w: number, h: number, colour: string) {
   ctx.strokeStyle = colour;
   ctx.fillStyle = colour;
@@ -75,7 +88,8 @@ function paint(ctx: CanvasRenderingContext2D, strokes: Stroke[], w: number, h: n
  *   Klein looks for it in the whole photo.
  * The photo shows uncropped while this is open, like Crop. Esc: back / done.
  */
-export default function RemoveOverlay({ image, busy, count, canFind, onRemove, onRemoveAll, onRemovePainted, onFind, onClearAll, onRetry, onDone, modes, onMode, startWhole = false }: Props) {
+export default function RemoveOverlay({ image, busy, count, canFind, onRemove, onRemoveAll, onRemovePainted, onFind, onClearAll, onRetry, onDone, modes, onMode, startWhole = false, removed, onUndoOne }: Props) {
+  const download = useSyncExternalStore(subscribeGpuRemoverDownload, getGpuRemoverDownload);
   const bar = useFloatingBar("remove");
   const layer = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -374,6 +388,32 @@ export default function RemoveOverlay({ image, busy, count, canFind, onRemove, o
           </div>
         ))}
       {shown && <div className={`remove-box${whole ? " remove-box--whole" : ""}${working ? " remove-box--busy" : ""}`} style={shown} />}
+      {/* A pin on each removal, numbered in the order made: click to undo just that one (Chris, 21
+          Nov). Hidden while a box is drawn or a removal runs. */}
+      {onUndoOne &&
+        !box &&
+        !working &&
+        removed?.map((r, i) => {
+          const a = at(r.area);
+          if (!a) return null;
+          return (
+            <button
+              key={r.file}
+              type="button"
+              className="removepin"
+              style={{ left: a.left + a.width / 2, top: a.top + a.height / 2 }}
+              title={`Removal ${i + 1}: click to undo it`}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onUndoOne(r.file);
+              }}
+            >
+              <span className="removepin__n">{i + 1}</span>
+              <X className="removepin__x" size={16} strokeWidth={2.8} aria-hidden="true" />
+            </button>
+          );
+        })}
       {tool === "brush" && cursor && !working && (
         // As the mask brush's (Layers): a thin cyan ring the brush's size.
         <svg className="remove-brush-cursor gradient-cursor" width="100%" height="100%">
@@ -392,36 +432,84 @@ export default function RemoveOverlay({ image, busy, count, canFind, onRemove, o
         <span className="cropbar__what">
           <Eraser size={13} /> Remove
         </span>
-        {modes && onMode && [modes.large, modes.medium, modes.lite].filter(Boolean).length > 1 && (
-          <span className="removebar__tools removebar__mode">
+        {modes && onMode && (modes.lite || modes.medium) && (
+          // CPU | GPU (Smarter) (Chris, 21 Nov): CPU is Lite (LaMa, any computer), GPU (Smarter) is
+          // FLUX.2 Klein 4B + a removal LoRA on the graphics card (gpumax.rs; RORem when that isn't
+          // installed). The hover text gives the graphics memory needed. A lit slider glides between them.
+          <span className="removeswitch" role="radiogroup" aria-label="Remover">
+            <span
+              className="removeswitch__slider"
+              style={{ transform: modes.mode === "medium" ? "translateX(100%)" : undefined }}
+              aria-hidden="true"
+            />
             {(
               [
-                ["large", modes.large, "Large", "FLUX.2 Klein + SAM 3 (graphics card): paints big areas believably; can invent things"],
-                ["medium", modes.medium, "Medium", "RORem + SAM 3 (graphics card): trained only to remove what's masked"],
-                ["lite", modes.lite, "Lite", "LaMa + MobileSAM + Grounding DINO (any computer, fast): continues the surroundings, never invents objects"],
+                [
+                  "lite",
+                  modes.lite,
+                  "CPU",
+                  modes.lite
+                    ? "CPU: works on any computer, no graphics card needed. Continues the surroundings; best on grass, foliage and plain backgrounds"
+                    : "CPU: LaMa isn't installed on this computer",
+                ],
+                [
+                  "medium",
+                  true,
+                  "GPU (Smarter)",
+                  modes.medium
+                    ? `GPU (Smarter): understands the scene and rebuilds what was behind (walls, railings, people's shadows). ${GPU_NEEDS}`
+                    : download.running
+                      ? download.checking
+                        ? "Checking the download. Click to stop (it carries on from here next time)"
+                        : `Downloading the GPU (Smarter) remover (${gbOf(download.done)} of ${gbOf(download.total)}). Click to stop (it carries on from here next time)`
+                      : download.error
+                        ? `The GPU (Smarter) remover's download stopped: ${download.error} Click to try again`
+                        : download.paused
+                          ? `The GPU (Smarter) remover's download is paused at ${gbOf(download.done)} of ${gbOf(download.total)}. Click to carry on`
+                          : `GPU (Smarter): download the remover (about ${IS_MAC ? "7.9" : "4.4"} GB, once) to remove on the graphics card. ${GPU_NEEDS}`,
+                ],
               ] as const
-            )
-              .filter(([, ok]) => ok)
-              .map(([id, , label, tip]) => (
+            ).map(([id, ok, label, tip]) => {
+              const fetching = id === "medium" && !modes.medium && download.running;
+              // While GPU (Smarter) holds the graphics card, the CPU side reads GPU OFF in red:
+              // clicking it frees the card and goes back to CPU (Chris, 21 Nov).
+              const gpuOff = id === "lite" && !!modes.gpuLoaded;
+              const pct = download.total > 0 ? Math.floor((100 * download.done) / download.total) : 0;
+              return (
                 <button
                   key={id}
                   type="button"
-                  className={modes.mode === id ? "is-on" : undefined}
-                  title={tip}
-                  disabled={working}
-                  onClick={() => {
+                  role="radio"
+                  aria-checked={modes.mode === id}
+                  className={`removeswitch__option${modes.mode === id && !gpuOff ? " removeswitch__option--on" : ""}${fetching ? " removeswitch__option--fetching" : ""}${gpuOff ? " removeswitch__option--gpuoff" : ""}`}
+                  style={fetching ? ({ "--fill": `${pct}%` } as React.CSSProperties) : undefined}
+                  title={gpuOff ? "GPU OFF: free the graphics card (GPU (Smarter) unloads) and go back to CPU" : tip}
+                  disabled={working || !ok}
+                  onClick={(e) => {
+                    if (e.detail > 0) e.currentTarget.blur();
+                    if (id === "medium" && !modes.medium) {
+                      if (download.running) void cancelGpuRemoverDownload();
+                      else
+                        void startGpuRemoverDownload().then((done) => {
+                          if (done) onMode("medium");
+                        });
+                      return;
+                    }
+                    if (modes.mode === id && !gpuOff) return;
                     onMode(id);
                     reset();
                   }}
                 >
-                  {label}
+                  {fetching ? (download.checking ? "Checking…" : `${pct}%`) : gpuOff ? "GPU OFF" : id === "medium" && !modes.medium && download.paused ? `Paused ${pct}%` : label}
                 </button>
-              ))}
+              );
+            })}
           </span>
         )}
-        {modes && [modes.large, modes.medium, modes.lite].filter(Boolean).length === 1 && (
-          <span className="removebar__keys" title="The remover installed on this computer">
-            {modes.mode === "lite" ? "Lite" : modes.mode === "medium" ? "Medium" : "Large"}
+        {modes && !modes.medium && download.error && !download.running && (
+          // A failed download says why where it can be seen, not only on hover.
+          <span className="removebar__dlerror" role="alert" title={download.error}>
+            Download stopped: {download.error}
           </span>
         )}
         <span className="removebar__tools" title="B: switch between box and brush">

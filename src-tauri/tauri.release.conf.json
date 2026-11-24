@@ -6,6 +6,10 @@
     ],
     "resources": {
       "../models/birefnet-lite.onnx": "models/birefnet-lite.onnx",
+      "../models/depth-anything-v2-small.onnx": "models/depth-anything-v2-small.onnx",
+      "../models/moge-2-vits-normal.onnx": "models/moge-2-vits-normal.onnx",
+      "../models/moge-2-vitb-normal.onnx": "models/moge-2-vitb-normal.onnx",
+      "../models/NOTICE-DINOv2.txt": "models/NOTICE-DINOv2.txt",
       "../models/denoise-student.onnx": "models/denoise-student.onnx",
       "../models/grounding-dino-tiny-int8.onnx": "models/grounding-dino-tiny-int8.onnx",
       "../models/grounding-dino-tokenizer.json": "models/grounding-dino-tokenizer.json",
@@ -20,7 +24,9 @@
     },
     "macOS": {
       "minimumSystemVersion": "13.4",
-      "signingIdentity": "-"
+      "signingIdentity": "-",
+      "hardenedRuntime": false,
+      "frameworks": ["mac-lib/libwebgpu_dawn.dylib"]
     },
     "linux": {
       "deb": {

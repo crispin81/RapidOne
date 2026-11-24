@@ -137,6 +137,7 @@ pub fn develop_superpixel(path: &Path) -> Result<Developed, String> {
     let decoder = rawler::get_decoder(&source).map_err(|e| e.to_string())?;
     let params = RawDecodeParams::default();
     let mut raw = decoder.raw_image(&source, &params, false).map_err(|e| e.to_string())?;
+    crate::kodak::fill_white_balance(&mut raw, path);
     let orientation = decoder
         .raw_metadata(&source, &params)
         .ok()
@@ -262,6 +263,7 @@ impl crate::demosaic::CfaPattern for Offset<'_> {
 /// Not oriented - it's the sensor's own way up.
 pub fn develop_window(path: &Path, method: Method, centre: (f32, f32), size: usize) -> Result<RgbImage, String> {
     let mut raw = rawler::decode_file(path).map_err(|e| e.to_string())?;
+    crate::kodak::fill_white_balance(&mut raw, path);
     let cfa = match &raw.photometric {
         RawPhotometricInterpretation::Cfa(config) => config.cfa.clone(),
         _ => return Err("not a colour-filter-array RAW".into()),
@@ -358,6 +360,15 @@ pub struct Scene {
     pub subject_mask: std::sync::OnceLock<Option<std::sync::Arc<crate::mask::Mask>>>,
     /// The subject mask refined against this photo (`gradient::refine_subject`), for subject masks.
     pub subject_refined: std::sync::OnceLock<Option<std::sync::Arc<crate::gradient::Grid>>>,
+    /// The photo's depth map (`depth::depth`), found the first time it's needed: the control
+    /// depth (1 = nearest, 0 = farthest, sky 0), at the model's own size.
+    pub depth_map: std::sync::OnceLock<Option<std::sync::Arc<crate::depth::DepthMap>>>,
+    /// The photo's scene geometry (`scene.rs`: MoGe-2's metric distances, normals, sky and
+    /// field of view), loaded from the folder's cache or found the first time it's needed.
+    pub scene3d: std::sync::OnceLock<Option<std::sync::Arc<crate::scene::Scene3D>>>,
+    /// The scene's control depth refined against this photo (2048 long side), and its sky mask,
+    /// for depth masks.
+    pub scene_refined: std::sync::OnceLock<Option<std::sync::Arc<crate::scene::Refined>>>,
     /// The scene with its noise taken out (AI noise reduction, `denoise`),
     /// made the first time the Noise slider is up, then kept with the scene.
     pub denoised: std::sync::OnceLock<Option<std::sync::Arc<crate::pipeline::SceneImage>>>,
@@ -375,6 +386,71 @@ impl Scene {
                 mask.as_ref().map(|m| std::sync::Arc::new(crate::gradient::refine_subject(m, &self.image)))
             })
             .clone()
+    }
+
+    /// The photo's scene geometry (`scene::scene`), found once: MoGe-2's pass over the developed
+    /// picture. None without the models (the depth map then comes from Depth Anything).
+    pub fn scene3d(&self) -> Option<std::sync::Arc<crate::scene::Scene3D>> {
+        self.scene3d
+            .get_or_init(|| {
+                let s = crate::scene::scene(&self.image);
+                match &s {
+                    Some(s) => eprintln!("[scene] {} on {} ({}x{})", s.model, crate::scene::execution_provider(), s.w, s.h),
+                    None => eprintln!("[scene] MoGe-2 not installed or failed: the depth map falls back to Depth Anything V2 Small"),
+                }
+                s.map(std::sync::Arc::new)
+            })
+            .clone()
+    }
+
+    /// The photo's control depth refined against it, with the sky mask: from the scene geometry
+    /// when there is one, else from its cached/output depth map (Depth Anything V2 Small as a
+    /// fallback), found once.
+    pub fn scene_refined(&self) -> Option<std::sync::Arc<crate::scene::Refined>> {
+        self.scene_refined
+            .get_or_init(|| {
+                // A map already known (the folder's cache): that one, and the scene only if it
+                // was loaded beside it. Else the scene geometry, which runs MoGe (or not at all).
+                let cached = self.depth_map.get().cloned().flatten();
+                let scene = if cached.is_some() { self.scene3d.get().cloned().flatten() } else { self.scene3d() };
+                let map = crate::scene::control_depth(scene.as_deref(), cached, || crate::depth::depth(&self.image))?;
+                // Its edge surfaces follow the subject's matte where one has already been found
+                // (hair): never found here, so a depth mask doesn't wait for the subject model.
+                let subject = self
+                    .subject_refined
+                    .get()
+                    .cloned()
+                    .flatten()
+                    .or_else(|| self.subject_mask.get().and_then(|m| m.as_ref()).map(|m| std::sync::Arc::new(crate::gradient::refine_subject(m, &self.image))));
+                let source: std::sync::Arc<crate::gradient::Grid> = match &scene {
+                    Some(s) => std::sync::Arc::new(s.mask_source().clone()),
+                    None => std::sync::Arc::new(crate::gradient::Grid { w: map.w, h: map.h, data: map.data.clone() }),
+                };
+                Some(std::sync::Arc::new(crate::scene::refine_map_with(scene.as_deref(), &source, &self.image, subject.as_deref())))
+            })
+            .clone()
+    }
+
+    /// The photo's control depth refined against it, with its edge surfaces: what a depth mask
+    /// reads (`scene_refined`).
+    pub fn depth_field(&self) -> Option<std::sync::Arc<crate::scene::Refined>> {
+        self.scene_refined()
+    }
+
+    /// The depth field only when it's known already (found, or its maps loaded from the folder's
+    /// cache): never runs a depth model. What an on-screen render uses, so a slider never waits
+    /// on (or starts) a model run; the depth is found once, in the background (`find_depth`).
+    pub fn depth_field_known(&self) -> Option<std::sync::Arc<crate::scene::Refined>> {
+        if let Some(r) = self.scene_refined.get() {
+            return r.clone();
+        }
+        let have_map = matches!(self.depth_map.get(), Some(Some(_)));
+        let have_scene = matches!(self.scene3d.get(), Some(Some(_)));
+        if have_map || have_scene {
+            self.scene_refined()
+        } else {
+            None
+        }
     }
 }
 
@@ -403,17 +479,10 @@ fn develop_scene_with(path: &Path, max_dim: usize, always_full: bool) -> Result<
     let decoder = rawler::get_decoder(&source).map_err(|e| e.to_string())?;
     let params = RawDecodeParams::default();
     let mut raw = decoder.raw_image(&source, &params, false).map_err(|e| e.to_string())?;
+    crate::kodak::fill_white_balance(&mut raw, path);
     let metadata = decoder.raw_metadata(&source, &params).ok();
     let orientation = metadata.as_ref().and_then(|m| m.exif.orientation).unwrap_or(1);
-    let lens_shot = metadata.as_ref().and_then(|m| {
-        let ratio = |r: Option<rawler::formats::tiff::Rational>| r.filter(|r| r.d > 0).map(|r| r.n as f32 / r.d as f32);
-        Some(crate::lensprofile::LensShot {
-            make: m.make.clone(),
-            lens: m.exif.lens_model.clone()?,
-            focal: ratio(m.exif.focal_length)?,
-            fnumber: ratio(m.exif.fnumber).unwrap_or(0.0),
-        })
-    });
+    let lens_shot = crate::lensprofile::read_shot(path);
     let decode_ms = started.elapsed().as_millis();
     drop(p_decode);
     let started = Instant::now();
@@ -550,6 +619,9 @@ fn develop_scene_with(path: &Path, max_dim: usize, always_full: bool) -> Result<
         develop_ms: started.elapsed().as_millis(),
         subject_mask: std::sync::OnceLock::new(),
         subject_refined: std::sync::OnceLock::new(),
+        depth_map: std::sync::OnceLock::new(),
+        scene3d: std::sync::OnceLock::new(),
+        scene_refined: std::sync::OnceLock::new(),
         denoised: std::sync::OnceLock::new(),
         colour_cleaned: Default::default(),
     })
@@ -557,7 +629,9 @@ fn develop_scene_with(path: &Path, max_dim: usize, always_full: bool) -> Result<
 
 /// Decodes just enough to inspect a RAW's metadata (developer tools).
 pub fn decode_for_info(path: &Path) -> Result<RawImage, String> {
-    rawler::decode_file(path).map_err(|e| e.to_string())
+    let mut raw = rawler::decode_file(path).map_err(|e| e.to_string())?;
+    crate::kodak::fill_white_balance(&mut raw, path);
+    Ok(raw)
 }
 
 /// The camera's white balance facts: its two colour matrices (tungsten "A"

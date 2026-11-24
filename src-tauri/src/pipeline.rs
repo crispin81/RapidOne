@@ -292,6 +292,10 @@ pub struct RenderSettings {
     /// filled in by the renderer.
     #[serde(skip)]
     pub subject_mask: Option<std::sync::Arc<crate::gradient::Grid>>,
+    /// The photo's depth map, refined against it (with the two surfaces at its edges), for its
+    /// depth masks (`gradient::Kind::Depth`), filled in by the renderer.
+    #[serde(skip)]
+    pub depth_map: Option<std::sync::Arc<crate::scene::Refined>>,
     /// Rendering just a part of the photo (zoomed-in detail): where it sits
     /// and what was measured on the whole photo. None: the whole photo.
     #[serde(skip)]
@@ -375,6 +379,13 @@ pub struct RenderSettings {
     /// Fine tuning, Mixer, Curves, Grade and Vignette (see `tools`).
     #[serde(flatten)]
     pub tools: crate::tools::ToolSettings,
+    /// The Creative tab's tools (Bokeh, Mist, Relight), off by default.
+    #[serde(default)]
+    pub creative: crate::creative::Creative,
+    /// The scene's ambient level for Mist's airlight, measured on the whole photo so a zoomed
+    /// part and the export match the preview. Filled in by the renderer, not the UI.
+    #[serde(skip)]
+    pub mist_ambient: Option<f32>,
 }
 
 fn purple_lo() -> f32 {
@@ -1552,6 +1563,17 @@ impl ToneGrid {
         let (w, scale) = (self.w, self.scale);
         (0..lit.len()).into_par_iter().map(|i| self.offset_at(ev(lit[i]), (i % w) as f32 / scale, (i / w) as f32 / scale, t)).collect()
     }
+
+    /// As `offsets`, on this thread only: for working them out lazily from inside a parallel loop
+    /// (`render_core`'s `lazy_offsets`). Done there with rayon, the thread initialising the
+    /// `OnceLock` waited on its own sub-jobs while the other workers, blocked on that same
+    /// `OnceLock`, could never run them: the whole render froze (24 Nov, with Relight on, which
+    /// keeps the render on the CPU, as soon as Highlights / Shadows needed the tone map).
+    pub fn offsets_here(&self, lit: &[f32], t: &Tuning) -> Vec<f32> {
+        let ev = |l: f32| (l.max(1e-5) / 0.18).log2();
+        let (w, scale) = (self.w, self.scale);
+        (0..lit.len()).map(|i| self.offset_at(ev(lit[i]), (i % w) as f32 / scale, (i / w) as f32 / scale, t)).collect()
+    }
 }
 
 impl ToneMap {
@@ -2423,8 +2445,8 @@ fn render_core_q<T: Copy + Send + 'static>(
     let mix_scene = tuning.tools.mix_before_tone > 0.5;
     let (w, h) = (scene.width, scene.height);
     let grads = match &frame {
-        Some(f) => crate::gradient::Prepared::new(&settings.gradients, f.full_w.round() as usize, f.full_h.round() as usize, settings.subject_mask.as_deref()),
-        None => crate::gradient::Prepared::new(&settings.gradients, w, h, settings.subject_mask.as_deref()),
+        Some(f) => crate::gradient::Prepared::new(&settings.gradients, f.full_w.round() as usize, f.full_h.round() as usize, settings.subject_mask.as_deref(), settings.depth_map.as_deref()),
+        None => crate::gradient::Prepared::new(&settings.gradients, w, h, settings.subject_mask.as_deref(), settings.depth_map.as_deref()),
     };
     // Pixel i as fractions of the whole photo.
     let frac = |i: usize| match &frame {
@@ -2460,7 +2482,7 @@ fn render_core_q<T: Copy + Send + 'static>(
     let lazy_offsets = std::sync::OnceLock::new();
     let at = |i: usize| {
         tone_map.as_ref().map_or((0.0, tuning.tone_key_ref, tuning.tone_span_ref), |m| {
-            let offset = if m.offset.is_empty() { lazy_offsets.get_or_init(|| m.grid.offsets(tone_lit.as_deref().unwrap_or(&[]), tuning)) } else { &m.offset };
+            let offset = if m.offset.is_empty() { lazy_offsets.get_or_init(|| m.grid.offsets_here(tone_lit.as_deref().unwrap_or(&[]), tuning)) } else { &m.offset };
             (offset[i], m.key, m.span)
         })
     };
@@ -2909,6 +2931,57 @@ mod tests {
         assert!(at(5.0, &wh) > at(1.0, &wh) && at(-3.0, &wh) < 0.2, "whites");
         let bl = s(|r| r.blacks = -100.0);
         assert!(at(-3.0, &bl) < -2.0 && at(3.0, &bl).abs() < 0.2, "blacks");
+    }
+
+    #[test]
+    fn bokeh_off_is_bit_identical() {
+        // A photo whose Creative panel has values but Bokeh switched off renders exactly as one
+        // that never opened the panel: the pass is skipped, not run with a zero radius.
+        let px = (0..64).map(|i| [((i % 8) as f32) / 8.0, 0.2, 0.4]).collect();
+        let scene = SceneImage { width: 8, height: 8, px, source_long: 8 };
+        let plain = render(&scene, &RenderSettings::default(), 0.0, None);
+        let mut off = RenderSettings::default();
+        off.creative.bokeh.focus_range = 60.0;
+        off.creative.bokeh.aperture = 1.2;
+        off.creative.bokeh.shape = crate::creative::BokehShape::Mirror;
+        let same = render(&scene, &off, 0.0, None);
+        assert_eq!(plain.as_raw(), same.as_raw());
+        // Switched on without a depth map: still nothing to blur, so also bit-identical.
+        let mut no_depth = off.clone();
+        no_depth.creative.bokeh.enabled = true;
+        assert_eq!(plain.as_raw(), render(&scene, &no_depth, 0.0, None).as_raw());
+    }
+
+    #[test]
+    fn mist_off_is_bit_identical() {
+        let px = (0..64).map(|i| [((i % 8) as f32) / 8.0, 0.2, 0.4]).collect();
+        let scene = SceneImage { width: 8, height: 8, px, source_long: 8 };
+        let plain = render(&scene, &RenderSettings::default(), 0.0, None);
+        let mut off = RenderSettings::default();
+        off.creative.mist.density = 90.0;
+        off.creative.mist.height = 60.0;
+        off.creative.mist.glow = 70.0;
+        assert_eq!(plain.as_raw(), render(&scene, &off, 0.0, None).as_raw());
+        // Switched on without a depth map: nothing to fog, so also bit-identical.
+        let mut no_depth = off.clone();
+        no_depth.creative.mist.enabled = true;
+        assert_eq!(plain.as_raw(), render(&scene, &no_depth, 0.0, None).as_raw());
+    }
+
+    #[test]
+    fn relight_off_is_bit_identical() {
+        let px = (0..64).map(|i| [((i % 8) as f32) / 8.0, 0.2, 0.4]).collect();
+        let scene = SceneImage { width: 8, height: 8, px, source_long: 8 };
+        let plain = render(&scene, &RenderSettings::default(), 0.0, None);
+        let mut off = RenderSettings::default();
+        off.creative.relight.ambient = -40.0;
+        off.creative.relight.relief = 60.0;
+        off.creative.relight.lights = vec![crate::creative::Light { intensity: 80.0, shadows: 50.0, ..Default::default() }];
+        assert_eq!(plain.as_raw(), render(&scene, &off, 0.0, None).as_raw());
+        // Switched on without a depth map: nothing to light by, so also bit-identical.
+        let mut no_depth = off.clone();
+        no_depth.creative.relight.enabled = true;
+        assert_eq!(plain.as_raw(), render(&scene, &no_depth, 0.0, None).as_raw());
     }
 
     #[test]

@@ -25,7 +25,12 @@ export default function ModeSwitch({ mode, onMode }: { mode: Mode; onMode: (m: M
           role="tab"
           aria-selected={m.id === mode}
           className={`modeswitch__option${m.id === mode ? " modeswitch__option--on" : ""}`}
-          onClick={() => onMode(m.id)}
+          onClick={(e) => {
+            // A mouse click mustn't leave the tab focused: Cull's rating keys would then
+            // turn on its keyboard-focus mark mid-cull. Tab / Enter keep focus as usual.
+            if (e.detail > 0) e.currentTarget.blur();
+            onMode(m.id);
+          }}
         >
           {m.label}
         </button>

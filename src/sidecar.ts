@@ -3,9 +3,11 @@ import type { ProfileId, Spot } from "./api";
 import type { Curves } from "./curves";
 import type { Grade } from "./grade";
 import type { Snapshot } from "./history";
+import { hasCreative, normalizeCreative } from "./creative.ts";
 import type { Mixer } from "./mixer";
 import type { Crop } from "./crop";
 import type { Gradient } from "./gradients";
+import type { Creative } from "./creative";
 
 /**
  * RapidOne's own sidecar (`.rpd`): plain JSON in a `sidecars` folder next to
@@ -33,6 +35,8 @@ export interface SidecarEdit {
   removals?: Spot[];
   /** Linear and radial gradients (local adjustments). */
   gradients?: Gradient[];
+  /** The Creative tab (Bokeh now); absent until it is used. */
+  creative?: Creative;
 }
 
 /** Where a photo's look came from: a style (Teach / apply look), a preset, or a Lightroom XMP (that one
@@ -67,6 +71,7 @@ export function editFromSnapshot(s: Snapshot): SidecarEdit {
     ...(s.crop ? { crop: s.crop } : {}),
     ...(s.removals?.length ? { removals: s.removals } : {}),
     ...(s.gradients?.length ? { gradients: s.gradients } : {}),
+    ...(s.creative && hasCreative(s.creative) ? { creative: s.creative } : {}),
   };
 }
 
@@ -80,6 +85,7 @@ export function snapshotFromEdit(e: SidecarEdit): Snapshot {
     crop: e.crop,
     removals: e.removals?.length ? e.removals : undefined,
     gradients: e.gradients?.length ? e.gradients : undefined,
+    creative: e.creative ? normalizeCreative(e.creative) : undefined,
   };
 }
 

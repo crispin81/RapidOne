@@ -33,7 +33,7 @@ fn extract_from_raw(path: &Path) -> Result<ExtractedImage, String> {
     let decoder = rawler::get_decoder(&source).map_err(|e| e.to_string())?;
     let params = RawDecodeParams::default();
 
-    let image = decoder
+    let embedded = decoder
         .preview_image(&source, &params)
         .map_err(|e| e.to_string())?
         .or(
@@ -45,11 +45,9 @@ fn extract_from_raw(path: &Path) -> Result<ExtractedImage, String> {
             decoder
                 .full_image(&source, &params)
                 .map_err(|e| e.to_string())?,
-        )
-        .ok_or_else(|| "no embedded preview, thumbnail, or full image available".to_string())?;
+        );
 
     let metadata = decoder.raw_metadata(&source, &params).map_err(|e| e.to_string())?;
-    let orientation = metadata.exif.orientation.unwrap_or(1);
     let timestamp_ms = metadata
         .exif
         .date_time_original
@@ -58,6 +56,12 @@ fn extract_from_raw(path: &Path) -> Result<ExtractedImage, String> {
             parse_exif_datetime(dt, metadata.exif.sub_sec_time_original.as_deref())
         })
         .unwrap_or(0);
+    // Some RAWs carry no camera JPEG at all (Kodak DCS DCRs): develop a quick
+    // half-size picture from the sensor instead. It comes out already upright.
+    let (image, orientation) = match embedded {
+        Some(image) => (image, metadata.exif.orientation.unwrap_or(1)),
+        None => (crate::develop::develop_superpixel(path).map_err(|e| format!("no embedded preview, and developing one failed: {e}"))?.image, 1),
+    };
 
     Ok(ExtractedImage {
         image,

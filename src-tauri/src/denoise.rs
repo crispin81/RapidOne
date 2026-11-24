@@ -23,7 +23,7 @@
 
 use crate::pipeline::SceneImage;
 use rayon::prelude::*;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 
 const MODEL_FILE: &str = "scunet-color-real-psnr.onnx";
 const STUDENT_FILE: &str = "denoise-student.onnx";
@@ -31,94 +31,57 @@ const TILE: usize = 512;
 /// Tiles overlap by this much and are blended across it, so no seams show.
 const OVERLAP: usize = 64;
 
-/// A session for `path`: on the CPU, or on graphics card `gpu` (Windows:
-/// a DirectML device; Linux: WebGPU, which picks the card itself; Apple
-/// Silicon: CoreML on the graphics, at full precision: not the Neural Engine,
-/// whose 16-bit maths would change the result).
-fn build(env: &ort::environment::Environment, path: &std::path::Path, gpu: Option<i32>) -> Option<ort::session::Session> {
-    let builder = ort::session::Session::builder(env).ok()?;
-    let mut builder = match gpu {
-        #[cfg(windows)]
-        Some(d) => builder
-            .with_parallel_execution(false)
-            .ok()?
-            .with_memory_pattern(false)
-            .ok()?
-            .with_execution_providers([ort::ep::DirectML::default().with_device_id(d).build().error_on_failure()])
-            .ok()?,
-        #[cfg(target_os = "linux")]
-        Some(_) => builder.with_execution_providers([ort::ep::WebGPU::default().build().error_on_failure()]).ok()?,
-        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-        Some(_) => {
-            let cache = std::env::temp_dir().join("rapidone-coreml");
-            builder
-                .with_execution_providers([ort::ep::CoreML::default()
-                    .with_model_format(ort::ep::coreml::ModelFormat::MLProgram)
-                    .with_compute_units(ort::ep::coreml::ComputeUnits::CPUAndGPU)
-                    .with_model_cache_dir(cache.display())
-                    .build()
-                    .error_on_failure()])
-                .ok()?
-        }
-        #[cfg(not(any(windows, target_os = "linux", all(target_os = "macos", target_arch = "aarch64"))))]
-        Some(_) => return None,
-        None => builder,
-    };
-    builder.commit_from_file(path).ok()
-}
+/// The noise model's session, built on first use and kept until `release` (then built again
+/// when next needed). Released when GPU (Smarter) unloads: while any WebGPU session lives, ONNX
+/// Runtime keeps its context, and with it the buffer cache GPU (Smarter) filled (~9 GB stayed on
+/// the card after GPU OFF, 21 Nov).
+static SESSION: Mutex<Option<Arc<Mutex<ort::session::Session>>>> = Mutex::new(None);
+/// The model isn't installed (or wouldn't load): not tried again.
+static MISSING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// The student on the fastest graphics card: each device (DirectML's on
-/// Windows; WebGPU's choice on Linux; the Mac's own graphics) is timed on a
-/// tile (after a warm-up run) and the quickest kept. None: no GPU works.
-#[cfg(any(windows, target_os = "linux", all(target_os = "macos", target_arch = "aarch64")))]
-fn fastest_gpu(env: &ort::environment::Environment, path: &std::path::Path) -> Option<ort::session::Session> {
-    let mut best: Option<(f32, ort::session::Session)> = None;
-    let devices = if cfg!(windows) { 0..4 } else { 0..1 };
-    for device in devices {
-        let Some(s) = build(env, path, Some(device)) else { continue };
-        let s = Mutex::new(s);
-        let tile = vec![0.5f32; 3 * TILE * TILE];
-        // A first run that isn't timed: it can include compiling the model for the
-        // device (CoreML on a Mac: 20 s or more the first time, which put Denoise on
-        // the CPU for the whole session, 25 Oct). Then a warm-up run; a device that
-        // is clearly slow (an integrated chip can be slower than the CPU) is not
-        // timed further.
-        if run_tile(&s, tile.clone()).is_none() {
-            continue;
+fn session() -> Option<Arc<Mutex<ort::session::Session>>> {
+    if MISSING.load(std::sync::atomic::Ordering::Relaxed) {
+        return None;
+    }
+    let mut slot = SESSION.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(s) = slot.as_ref() {
+        return Some(s.clone());
+    }
+    let built = (|| {
+        let env = crate::mask::ort_env()?;
+        let student = crate::mask::find_model(STUDENT_FILE);
+        // RAPIDONE_DENOISE_CPU=1: as a machine without a graphics card would (testing).
+        let cpu_only = std::env::var("RAPIDONE_DENOISE_CPU").is_ok();
+        #[cfg(any(windows, target_os = "linux", all(target_os = "macos", target_arch = "aarch64")))]
+        if let Some(s) = student.as_ref().filter(|_| !cpu_only).and_then(|p| {
+            let tile = vec![0.5f32; 3 * TILE * TILE];
+            crate::ortgpu::fastest(env, p, |s| run_tile(s, tile.clone()).is_some()).map(|(s, _)| s)
+        }) {
+            return Some(s);
         }
-        let warm = std::time::Instant::now();
-        if run_tile(&s, tile.clone()).is_none() || warm.elapsed().as_secs_f32() > 0.25 {
-            continue;
+        if let Some(s) = student.as_ref().and_then(|p| crate::ortgpu::build(env, p, None)) {
+            return Some(s);
         }
-        let t = std::time::Instant::now();
-        let ok = (0..3).all(|_| run_tile(&s, tile.clone()).is_some());
-        let secs = t.elapsed().as_secs_f32() / 3.0;
-        if ok && best.as_ref().is_none_or(|(b, _)| secs < *b) {
-            best = Some((secs, s.into_inner().ok()?));
+        let path = crate::mask::find_model(MODEL_FILE)?;
+        crate::ortgpu::build(env, &path, None)
+    })();
+    match built {
+        Some(s) => {
+            let s = Arc::new(Mutex::new(s));
+            *slot = Some(s.clone());
+            Some(s)
+        }
+        None => {
+            MISSING.store(true, std::sync::atomic::Ordering::Relaxed);
+            None
         }
     }
-    best.map(|(_, s)| s)
 }
 
-fn session() -> Option<&'static Mutex<ort::session::Session>> {
-    static SESSION: OnceLock<Option<Mutex<ort::session::Session>>> = OnceLock::new();
-    SESSION
-        .get_or_init(|| {
-            let env = crate::mask::ort_env()?;
-            let student = crate::mask::find_model(STUDENT_FILE);
-            // RAPIDONE_DENOISE_CPU=1: as a machine without a graphics card would (testing).
-            let cpu_only = std::env::var("RAPIDONE_DENOISE_CPU").is_ok();
-            #[cfg(any(windows, target_os = "linux", all(target_os = "macos", target_arch = "aarch64")))]
-            if let Some(s) = student.as_ref().filter(|_| !cpu_only).and_then(|p| fastest_gpu(env, p)) {
-                return Some(Mutex::new(s));
-            }
-            if let Some(s) = student.as_ref().and_then(|p| build(env, p, None)) {
-                return Some(Mutex::new(s));
-            }
-            let path = crate::mask::find_model(MODEL_FILE)?;
-            Some(Mutex::new(build(env, &path, None)?))
-        })
-        .as_ref()
+/// Drops the noise model's session (a denoise in progress keeps its own until done); the next
+/// denoise builds it again (~0.3 s).
+pub fn release() {
+    *SESSION.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
 
 /// Whether the denoise model is installed.
@@ -166,7 +129,7 @@ pub fn denoise_encoded(img: &[[f32; 3]], w: usize, h: usize) -> Option<Vec<[f32;
                     }
                 }
             }
-            let out = run_tile(session, input)?;
+            let out = run_tile(&session, input)?;
             // Weight: 1 inside, ramping down across the overlap (but not at
             // the picture's own edges, which no other tile covers).
             let ramp = |i: usize, start: usize, len: usize| -> f32 {
@@ -243,4 +206,35 @@ pub fn scene(scene: &SceneImage) -> Option<SceneImage> {
         .map(|(p, (e, d))| std::array::from_fn(|c| white * (enc(p[c]) + d[c] - e[c]).max(0.0).powf(2.2)))
         .collect();
     Some(SceneImage { width: scene.width, height: scene.height, px, source_long: scene.source_long })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Released (GPU (Smarter) unloading) and used again: rebuilt by itself, same result, and a
+    /// denoise in progress keeps its own session (the batch export case). Skipped without the model.
+    #[test]
+    fn release_then_denoise_again() {
+        if !available() {
+            eprintln!("denoise model not installed: skipped");
+            return;
+        }
+        let (w, h) = (300usize, 200usize);
+        let img: Vec<[f32; 3]> = (0..w * h).map(|i| {
+            let v = ((i * 7919) % 97) as f32 / 97.0 * 0.2 + 0.4;
+            [v, v * 0.9, v * 1.1]
+        }).collect();
+        let a = denoise_encoded(&img, w, h).expect("first");
+        // A session held across a release (a denoise in progress) still runs.
+        let held = session().expect("held");
+        release();
+        let mut input = vec![0.0f32; 3 * TILE * TILE];
+        input.iter_mut().enumerate().for_each(|(i, v)| *v = (i % 13) as f32 / 13.0);
+        assert!(run_tile(&held, input).is_some());
+        drop(held);
+        let b = denoise_encoded(&img, w, h).expect("after release: rebuilt by itself");
+        let diff = a.iter().zip(&b).map(|(p, q)| (0..3).map(|c| (p[c] - q[c]).abs()).fold(0.0f32, f32::max)).fold(0.0f32, f32::max);
+        assert!(diff < 1e-3, "same result after rebuilding: max diff {diff}");
+    }
 }

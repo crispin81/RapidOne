@@ -7,7 +7,8 @@
 //! number in capture-time order. An output that would be the source file
 //! itself (a JPEG or TIFF original exported next to itself) gets `_edited`.
 //!
-//! sRGB, as the viewer shows it, untagged (like the Retouch hand-off).
+//! sRGB, as the viewer shows it. A TIFF is uncompressed, tagged sRGB at 300 ppi, with the camera
+//! details and RapidOne as the software (`tiffout.rs`); a JPEG is untagged (sRGB by default).
 
 use std::collections::HashSet;
 use std::fs::File;
@@ -179,6 +180,14 @@ pub fn write(
     if let Some(mask) = crate::diskcache::load_mask(photo) {
         let _ = scene.subject_mask.set(Some(std::sync::Arc::new(mask)));
     }
+    // Its depth map as the viewer found it, so the export doesn't run the model again, and the
+    // scene geometry beside it (the control map's own, should the PNG have gone).
+    if let Some(map) = crate::diskcache::load_depth(photo) {
+        let _ = scene.depth_map.set(Some(std::sync::Arc::new(map)));
+    }
+    if let Some(s) = crate::diskcache::load_scene(photo) {
+        let _ = scene.scene3d.set(Some(std::sync::Arc::new(s)));
+    }
     if let Some(dir) = out.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
@@ -190,7 +199,7 @@ pub fn write(
                 img = image::imageops::resize(&img, w, h, image::imageops::FilterType::Lanczos3);
             }
             progress(0.85, "Saving the TIFF…");
-            write_tiff(&tmp, &img)
+            crate::tiffout::write(&tmp, &img, &crate::tiffout::Meta::read(photo))
         }
         Format::Jpeg => {
             let mut img = crate::commands::render_image(&scene, settings).to_rgb8();
@@ -219,16 +228,6 @@ fn scaled(w: u32, h: u32, long: Option<u32>) -> Option<(u32, u32)> {
     }
     let f = long as f64 / current as f64;
     Some((((w as f64 * f).round() as u32).max(1), ((h as f64 * f).round() as u32).max(1)))
-}
-
-fn write_tiff(path: &Path, img: &image::ImageBuffer<image::Rgb<u16>, Vec<u16>>) -> Result<(), String> {
-    use tiff::encoder::{colortype::RGB16, Compression, DeflateLevel, Predictor, TiffEncoder};
-    let out = BufWriter::new(File::create(path).map_err(|e| e.to_string())?);
-    let mut encoder = TiffEncoder::new(out)
-        .map_err(|e| e.to_string())?
-        .with_compression(Compression::Deflate(DeflateLevel::Fast))
-        .with_predictor(Predictor::Horizontal);
-    encoder.write_image::<RGB16>(img.width(), img.height(), img.as_raw()).map_err(|e| e.to_string())
 }
 
 /// Encoded in strips on all cores (`jpeg`), colour at full size (4:4:4). `jpeg-encoder`'s quality 99

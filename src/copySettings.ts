@@ -1,8 +1,8 @@
-import { SLIDER_GROUPS } from "./adjustments";
+import { SLIDER_GROUPS } from "./adjustments.ts";
 import type { Snapshot } from "./history";
 
 /** Parts of a photo's edit stored outside its sliders. */
-type Part = "curves" | "grade" | "mixer" | "profile" | "crop" | "gradients";
+type Part = "curves" | "grade" | "mixer" | "profile" | "crop" | "gradients" | "creative";
 
 export interface CopyGroup {
   id: string;
@@ -33,6 +33,7 @@ export const COPY_GROUPS: CopyGroup[] = [
   { id: "keystone", label: "Keystone and rotation", sliders: [...slidersOf("Keystone"), "autoTransform"], parts: [], byDefault: false },
   { id: "crop", label: "Crop", sliders: [], parts: ["crop"], byDefault: false },
   { id: "gradients", label: "Masks (subject, brush, linear, radial)", sliders: [], parts: ["gradients"], byDefault: false },
+  { id: "creative", label: "Creative (Bokeh, Mist, Relight)", sliders: [], parts: ["creative"], byDefault: false },
 ];
 
 export const DEFAULT_COPY_GROUPS = COPY_GROUPS.filter((g) => g.byDefault).map((g) => g.id);

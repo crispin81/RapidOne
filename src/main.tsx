@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { applySavedRenderMode } from "./components/RenderMenu";
+import { applySavedDepthQuality } from "./components/DepthQualityPick";
 import "@fontsource/exo-2/300.css";
 import "@fontsource/exo-2/400.css";
 import "@fontsource/exo-2/500.css";
@@ -50,6 +51,8 @@ window.addEventListener(
 
 // The Render setting the user chose (Auto, GPU or CPU), before the first photo renders.
 applySavedRenderMode();
+// The Depth quality setting (Standard or High, phase 1c): each photo's depth is made at it.
+applySavedDepthQuality();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

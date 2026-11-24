@@ -11,8 +11,96 @@
 
 use crate::pipeline::SceneImage;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
+
+/// A camera's EXIF field as a number (rational, or an integer), when it is one.
+fn exif_number(f: &exif::Field) -> Option<f32> {
+    match &f.value {
+        exif::Value::Rational(v) => v.first().map(|r| r.to_f32()).filter(|x| x.is_finite()),
+        exif::Value::SRational(v) => v.first().map(|r| r.to_f32()).filter(|x| x.is_finite()),
+        exif::Value::Long(v) => v.first().map(|x| *x as f32),
+        exif::Value::Short(v) => v.first().map(|x| *x as f32),
+        _ => None,
+    }
+}
+
+/// The lens and shot from a photo's metadata (a RAW's own tags, else the file's EXIF): focal
+/// length, f-number, 35 mm-equivalent focal, sensor width and focus distance where the camera
+/// recorded them. `None` when the file names no lens at all; any single fact may still be missing.
+pub fn read_shot(path: &Path) -> Option<LensShot> {
+    let raw = rawler::rawsource::RawSource::new(path).ok().and_then(|src| {
+        let dec = rawler::get_decoder(&src).ok()?;
+        dec.raw_metadata(&src, &rawler::decoders::RawDecodeParams::default()).ok()
+    });
+    let file = std::fs::File::open(path).ok().and_then(|f| exif::Reader::new().read_from_container(&mut std::io::BufReader::new(f)).ok());
+    let tag = |t: exif::Tag| file.as_ref().and_then(|e| e.get_field(t, exif::In::PRIMARY));
+    let ratio = |r: Option<rawler::formats::tiff::Rational>| r.filter(|r| r.d > 0).map(|r| r.n as f32 / r.d as f32);
+    let from_raw = raw.as_ref().and_then(|m| {
+        Some((
+            m.exif.lens_model.clone(),
+            ratio(m.exif.focal_length),
+            ratio(m.exif.fnumber),
+            ratio(m.exif.subject_distance),
+            m.exif.subject_distance_range,
+        ))
+    });
+    let (raw_lens, raw_focal, raw_f, raw_focus, raw_range) = match from_raw {
+        Some(v) => v,
+        None => (None, None, None, None, None),
+    };
+    let lens = raw_lens
+        .or_else(|| tag(exif::Tag::LensModel).and_then(|f| f.display_value().to_string().trim_matches('"').to_string().into()))
+        .unwrap_or_default();
+    let focal = raw_focal.or_else(|| tag(exif::Tag::FocalLength).and_then(exif_number)).filter(|f| *f > 0.0);
+    let mut fnumber = raw_f.or_else(|| tag(exif::Tag::FNumber).and_then(exif_number)).filter(|n| *n > 0.0);
+    if fnumber.is_none() {
+        // APEX aperture value: f-number = 2^(Av/2).
+        fnumber = tag(exif::Tag::ApertureValue).and_then(exif_number).filter(|a| *a > 0.0).map(|a| 2f32.powf(a / 2.0));
+    }
+    if lens.is_empty() && focal.is_none() {
+        return None;
+    }
+    let focal_35 = tag(exif::Tag::FocalLengthIn35mmFilm).and_then(|f| f.value.get_uint(0)).filter(|v| *v > 0).map(|v| v as f32);
+    // The crop factor from EXIF's 35 mm-equivalent focal; else the focal-plane resolution over the
+    // image's pixel width (unit: 1 none, 2 inch, 3 cm).
+    let sensor_width_mm = focal_35
+        .zip(focal)
+        .map(|(f35, f)| 36.0 / (f35 / f).max(1e-3))
+        .or_else(|| {
+            let res = tag(exif::Tag::FocalPlaneXResolution).and_then(exif_number)?;
+            let unit = tag(exif::Tag::FocalPlaneResolutionUnit).and_then(|f| f.value.get_uint(0)).unwrap_or(2);
+            let px = tag(exif::Tag::PixelXDimension)
+                .and_then(|f| f.value.get_uint(0))
+                .or_else(|| tag(exif::Tag::ImageWidth).and_then(|f| f.value.get_uint(0)))?;
+            let per_mm = match unit {
+                2 => res / 25.4,
+                3 => res / 10.0,
+                _ => return None,
+            };
+            (per_mm > 0.0).then(|| px as f32 / per_mm)
+        })
+        .filter(|w| *w > 1.0 && *w < 100.0);
+    let focus_distance_m = raw_focus
+        .or_else(|| tag(exif::Tag::SubjectDistance).and_then(exif_number))
+        .filter(|d| d.is_finite() && *d > 0.01 && *d < 1.0e5)
+        .or_else(|| match raw_range.or_else(|| tag(exif::Tag::SubjectDistanceRange).and_then(|f| f.value.get_uint(0).map(|v| v as u16))) {
+            // EXIF's SubjectDistanceRange: 1 macro, 2 close, 3 distant.
+            Some(1) => Some(0.3),
+            Some(2) => Some(1.5),
+            _ => None,
+        });
+    Some(LensShot {
+        make: raw.as_ref().map(|m| m.make.clone()).or_else(|| tag(exif::Tag::Make).and_then(|f| Some(f.display_value().to_string().trim_matches('"').to_string()))).unwrap_or_default(),
+        lens,
+        focal: focal.unwrap_or(0.0),
+        fnumber: fnumber.unwrap_or(0.0),
+        focal_35,
+        sensor_width_mm,
+        focus_distance_m,
+    })
+}
+
 
 /// The lens and shot from a RAW's EXIF.
 #[derive(Clone, Debug, Default)]
@@ -21,6 +109,13 @@ pub struct LensShot {
     pub lens: String,
     pub focal: f32,
     pub fnumber: f32,
+    /// The 35 mm-equivalent focal length (EXIF), when the photo has one: with `focal` it gives the
+    /// sensor's crop factor, and so its width for the Bokeh panel's lens maths.
+    pub focal_35: Option<f32>,
+    /// The sensor's width in mm: from the crop factor, else EXIF's focal-plane resolution.
+    pub sensor_width_mm: Option<f32>,
+    /// The focus distance in metres from EXIF (SubjectDistance), when the camera recorded one.
+    pub focus_distance_m: Option<f32>,
 }
 
 #[derive(Clone, Debug)]

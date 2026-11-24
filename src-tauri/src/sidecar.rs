@@ -202,6 +202,24 @@ mod tests {
     }
 
     #[test]
+    fn an_old_sidecar_without_creative_still_reads_as_an_edit() {
+        // The .rpd a photo edited before phase 2 has: no `creative` key. It is still an edit, and
+        // the Creative panel starts at its defaults; a new one keeps its Bokeh.
+        let old = r#"{"format":"rapidone-sidecar","version":1,"origin":"rapidone","edit":{"sliders":{"exposure":0.4}}}"#;
+        let dir = std::env::temp_dir().join(format!("rapidone-sidecar-old-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join(FOLDER)).unwrap();
+        let photo = dir.join("old.RW2");
+        std::fs::write(&photo, b"").unwrap();
+        write(&photo, old).unwrap();
+        assert!(has_edit(&photo));
+        assert!(!read(&photo).unwrap().contains("creative"));
+        let new = r#"{"format":"rapidone-sidecar","version":1,"origin":"rapidone","edit":{"sliders":{},"creative":{"bokeh":{"enabled":true}}}}"#;
+        write(&photo, new).unwrap();
+        assert!(has_edit(&photo));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn stars_from_another_tab_survive_an_edit_save() {
         let dir = std::env::temp_dir().join(format!("rapidone-flags-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);

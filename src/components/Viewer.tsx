@@ -133,6 +133,11 @@ interface Props {
   noCompare?: boolean;
   /** A picker (white balance, defringe) is open: its click layer, given the photo as shown. */
   pickOverlay?: (image: HTMLImageElement | null) => ReactNode;
+  /** Relight's light handles over the photo, given the photo as shown. */
+  lightOverlay?: (image: HTMLImageElement | null) => ReactNode;
+  /** A full-frame picture over the photo, aligned to its uncropped frame (Creative's Depth
+   *  picture). Hidden while zoomed in. */
+  pictureOverlay?: { src: string } | null;
 }
 
 /**
@@ -303,6 +308,8 @@ export default function Viewer({
   detailKey = "",
   onDetailActive,
   pickOverlay,
+  lightOverlay,
+  pictureOverlay,
 }: Props) {
   const [comparing, setComparing] = useState(false);
   // A new photo starts on After; \ switches Before / After (Edit only, not while typing).
@@ -1280,6 +1287,23 @@ export default function Viewer({
                 )}
               </div>
             )}
+            {/* The Creative Depth picture: the photo's depth, warm near and cool far, over the
+                uncropped frame (the crop shows its matching part). */}
+            {pictureOverlay && !placed && !removing && !cropping && (
+              <img
+                className="viewer__picture-overlay"
+                src={pictureOverlay.src}
+                alt=""
+                aria-hidden="true"
+                draggable={false}
+                style={{
+                  left: layerPlace.left - (crop.x0 / cropW) * layerPlace.w,
+                  top: layerPlace.top - (crop.y0 / cropH) * layerPlace.h,
+                  width: layerPlace.w / cropW,
+                  height: layerPlace.h / cropH,
+                }}
+              />
+            )}
             {/* The zoom controls live in the top bar (Fit, and the percentage), not over the photo. */}
             {zoomable &&
               zoomSlot &&
@@ -1290,6 +1314,7 @@ export default function Viewer({
             {/* Not held back while a render is on its way (after a pick, the next wait was for the render, and
                 the picker seemed not to open again, 1 Nov): the colour is read from the photo itself. */}
             {pickOverlay && !removing && !cropping && shown && !wholeOfCropped(shown.uncropped) && pickOverlay(placed ? zoomImgEl : imgEl)}
+            {lightOverlay && !removing && !cropping && shown && lightOverlay(placed ? zoomImgEl : imgEl)}
             {removing && preview?.path === photo.path && !preview.pending && removeOverlay?.(placed && overlayZooms ? (windowed ? zoomProxyEl : zoomImgEl) : windowed ? proxyEl : imgEl)}
             {cropping && preview?.path === photo.path && !preview.pending && (
               <>
@@ -1367,7 +1392,7 @@ export default function Viewer({
               <span>
                 {photo.fileName}
                 {preview?.path === photo.path && preview.camera && ` · ${preview.camera}`}
-                {` · ${index + 1} / ${total}`}
+                {index >= 0 ? ` · ${index + 1} / ${total}` : " · not in the filter"}
                 {comparing
                   ? compareWith === "camera" || beforePreview?.path !== photo.path
                     ? compareWith === "camera" ? " · Camera JPEG" : " · Before (rendering…)"

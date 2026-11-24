@@ -1,12 +1,13 @@
 import type { SliderDef } from "./adjustments";
 
 /**
- * Linear and radial gradients and subject masks (local adjustments), as the
+ * Linear, radial, subject, brush and depth masks (local adjustments), as the
  * engine takes them (`gradient.rs`). Positions are fractions of the upright,
  * uncropped photo. A subject mask has no position: each photo's own subject
- * is found for it, so it pastes onto other photos as a recipe.
+ * is found for it, so it pastes onto other photos as a recipe. So is a depth
+ * mask: each photo's own depth map is found for it.
  */
-export type GradientKind = "linear" | "radial" | "subject" | "brush";
+export type GradientKind = "linear" | "radial" | "subject" | "brush" | "depth";
 
 /** One stroke of a brush mask: its path (fractions of the photo), radius (a fraction of the
  *  photo's width), 0..100 feather, and whether it erases. */
@@ -27,6 +28,16 @@ export interface MaskPart {
 export function hasSubject(g: Gradient): boolean {
   return g.kind === "subject" || Boolean(g.parts?.some((p) => p.shape.kind === "subject"));
 }
+
+/** Whether a mask needs the photo's depth map (its own shape, or one of its parts). */
+export function hasDepth(g: Gradient): boolean {
+  return g.kind === "depth" || Boolean(g.parts?.some((p) => p.shape.kind === "depth"));
+}
+
+/** A new depth mask's band: from the nearest part to half way back, easing over a tenth. */
+export const DEPTH_NEAR = 1;
+export const DEPTH_FAR = 0.5;
+export const DEPTH_FADE = 0.1;
 
 /** A new brush's size (radius, a fraction of the photo's width) and feather. */
 export const BRUSH_SIZE = 0.03;
@@ -63,6 +74,11 @@ export interface Gradient {
   /** Subject: the subject mask as found on the photo it was copied from (PNG, base64), used as it is:
    *  a combined mask with a subject in it is pasted as a fixed shape, not found again per photo. */
   frozen?: string;
+  /** Depth: the band's near and far ends, 0..1 (1 = nearest, 0 = farthest), and how far either side
+   *  it eases off (`fade`). Old edits without them are 1, 0.5 and 0.1, as the engine defaults. */
+  near?: number;
+  far?: number;
+  fade?: number;
   /** Stops. */
   exposure: number;
   /** -100..100 each. */
@@ -92,6 +108,9 @@ export function newGradient(kind: GradientKind, a: { x: number; y: number }, b: 
     angle: 0,
     feather: 50,
     invert: false,
+    near: DEPTH_NEAR,
+    far: DEPTH_FAR,
+    fade: DEPTH_FADE,
     exposure: 0,
     temperature: 0,
     tint: 0,
@@ -106,6 +125,8 @@ export function newGradient(kind: GradientKind, a: { x: number; y: number }, b: 
     saturation: 0,
   };
   if (kind === "subject") base.feather = SUBJECT_FEATHER;
+  // A depth mask's edge is its fade; Feather then softens it further, so it starts at none.
+  if (kind === "depth") base.feather = 0;
   if (kind === "radial") {
     base.rx = Math.max(0.01, Math.abs(b.x - a.x));
     base.ry = Math.max(0.01, Math.abs(b.y - a.y));

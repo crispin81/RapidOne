@@ -1,10 +1,12 @@
-//! Linear and radial gradients, and the subject mask: local adjustments that
-//! fade across the photo, Lightroom-style. A subject mask is a recipe (its
-//! sliders, Feather and Invert), not a shape: each photo's own subject (the
-//! subject model, `mask`) is found for it, so it pastes onto a batch as
-//! Lightroom's Select Subject does. RapidOne's own formulas (not matched to
-//! Lightroom's local sliders yet). Positions are fractions of the upright,
-//! uncropped photo, like removals, so a crop doesn't move them.
+//! Linear and radial gradients, and the subject, brush and depth masks: local
+//! adjustments that fade across the photo, Lightroom-style. A subject mask is a
+//! recipe (its sliders, Feather and Invert), not a shape: each photo's own
+//! subject (the subject model, `mask`) is found for it, so it pastes onto a
+//! batch as Lightroom's Select Subject does. A depth mask is a recipe too: each
+//! photo's own depth map (`depth`) is found for it, and its band is set between
+//! a near and a far end. RapidOne's own formulas (not matched to Lightroom's
+//! local sliders yet). Positions are fractions of the upright, uncropped photo,
+//! like removals, so a crop doesn't move them.
 //!
 //! Exposure, Temperature and Tint act on scene light (before the tone
 //! controls, as the global sliders do); Contrast, Highlights, Shadows and
@@ -22,6 +24,9 @@ pub enum Kind {
     Subject,
     /// Painted by hand (`strokes`).
     Brush,
+    /// Everything between `far` and `near` in the photo's depth map (1 = nearest, 0 = farthest),
+    /// with a smooth fade of `fade` either side.
+    Depth,
 }
 
 /// A part of a combined mask: another shape added to the mask (where either is) or
@@ -46,7 +51,7 @@ pub struct Stroke {
     pub erase: bool,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Gradient {
     pub kind: Kind,
@@ -71,6 +76,11 @@ pub struct Gradient {
     pub strokes: Vec<Stroke>,
     /// Other shapes added to or subtracted from this one (a combined mask).
     pub parts: Vec<Part>,
+    /// Depth: the band's near and far ends, 0..1 (1 = nearest, 0 = farthest): full effect between
+    /// them, easing to nothing over `fade` either side. Old files without them get 1 and 0.5.
+    pub near: f32,
+    pub far: f32,
+    pub fade: f32,
     /// Subject: the subject mask as found on the photo it was copied from (a PNG, base64),
     /// used as it is instead of finding the subject again: a combined mask with a subject in
     /// it is pasted as a fixed shape. None: the photo's own subject.
@@ -92,6 +102,43 @@ pub struct Gradient {
     pub clarity: f32,
     pub dehaze: f32,
     pub saturation: f32,
+}
+
+impl Default for Gradient {
+    /// As the derived one, except a depth mask's band: everything from the photo's nearest part
+    /// to half way back, easing over a tenth of the range either side.
+    fn default() -> Self {
+        Gradient {
+            kind: Kind::default(),
+            hidden: false,
+            full: [0.0; 2],
+            zero: [0.0; 2],
+            centre: [0.0; 2],
+            rx: 0.0,
+            ry: 0.0,
+            angle: 0.0,
+            feather: 0.0,
+            invert: false,
+            strokes: Vec::new(),
+            parts: Vec::new(),
+            frozen: None,
+            near: 1.0,
+            far: 0.5,
+            fade: 0.1,
+            exposure: 0.0,
+            temperature: 0.0,
+            tint: 0.0,
+            contrast: 0.0,
+            highlights: 0.0,
+            shadows: 0.0,
+            whites: 0.0,
+            blacks: 0.0,
+            texture: 0.0,
+            clarity: 0.0,
+            dehaze: 0.0,
+            saturation: 0.0,
+        }
+    }
 }
 
 /// The gradients' combined amounts at one pixel.
@@ -168,7 +215,7 @@ impl Gradient {
                 if self.invert { 1.0 - w } else { w }
             }
             // Need the photo's mask, or the painted one: see `Prepared`.
-            Kind::Subject | Kind::Brush => 0.0,
+            Kind::Subject | Kind::Brush | Kind::Depth => 0.0,
         }
     }
 }
@@ -183,7 +230,7 @@ const BRUSH_GRID: usize = 1024;
 
 /// A mask over the whole photo, 0..1 per pixel of a `w` x `h` grid (the photo's shape):
 /// a brush mask painted, or a subject mask refined (`refine_subject`).
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Grid {
     pub w: usize,
     pub h: usize,
@@ -290,6 +337,33 @@ impl Grid {
         let once = box_blur(&self.data, self.w, self.h, r);
         Grid { w: self.w, h: self.h, data: box_blur(&once, self.w, self.h, r) }
     }
+
+    /// A depth map's band for a depth mask: full (1) between `far` and `near` (0..1, 1 = nearest),
+    /// easing to nothing over `fade` above Near and below Far. Flat inside, not multiplied by the
+    /// depth itself: the band is the same effect everywhere in it.
+    pub fn depth_band(&self, near: f32, far: f32, fade: f32) -> Grid {
+        let data = self.data.iter().map(|&v| band_weight(v, near, far, fade)).collect();
+        Grid { w: self.w, h: self.h, data }
+    }
+}
+
+/// A depth mask's band at one control-depth value: full (1) between `far` and `near` (0..1,
+/// 1 = nearest), easing to nothing over `fade` either side. Flat inside: the band is the same
+/// effect everywhere in it, never multiplied by the depth itself. The edge maps (`edges.rs`) use
+/// it for each of their two surfaces.
+pub fn band_weight(value: f32, near: f32, far: f32, fade: f32) -> f32 {
+    let (a, b) = (near.clamp(0.0, 1.0), far.clamp(0.0, 1.0));
+    let (near, far) = (a.max(b), a.min(b));
+    let fade = fade.clamp(0.0, 1.0);
+    if fade <= 1e-4 {
+        if value >= far && value <= near { 1.0 } else { 0.0 }
+    } else if value > near {
+        1.0 - smooth((value - near) / fade)
+    } else if value < far {
+        1.0 - smooth((far - value) / fade)
+    } else {
+        1.0
+    }
 }
 
 impl Grid {
@@ -361,7 +435,7 @@ pub(crate) enum Comp {
 }
 
 impl Comp {
-    fn new(shape: &Gradient, aspect: f32, subject: Option<&Grid>) -> Comp {
+    fn new(shape: &Gradient, aspect: f32, subject: Option<&Grid>, depth: Option<&crate::scene::Refined>) -> Comp {
         match shape.kind {
             Kind::Subject => {
                 let frozen = shape.frozen.as_deref().and_then(Grid::from_png_base64);
@@ -370,6 +444,17 @@ impl Comp {
                     None => Comp::Nothing,
                 }
             }
+            Kind::Depth => match depth {
+                // The scene's two surfaces where its depth jumps (a hair line, a silhouette):
+                // alpha·band(near) + (1 − alpha)·band(far), so a band on the subject alone leaves
+                // the background's rim alone. Without them, the map's own band.
+                Some(d) => Comp::Map(match d.edges.as_deref() {
+                    Some(e) => e.band(shape.near, shape.far, shape.fade),
+                    None => d.control.depth_band(shape.near, shape.far, shape.fade),
+                }
+                .feathered(shape.feather)),
+                None => Comp::Nothing,
+            },
             Kind::Brush => Comp::Map(Grid::painted(&shape.strokes, aspect)),
             // Its own Invert is applied by the mask (see `MaskShape::at`).
             _ => Comp::Formula(Gradient { invert: false, ..shape.clone() }),
@@ -397,10 +482,12 @@ pub struct MaskShape {
 
 impl MaskShape {
     /// `subject`: the photo's subject mask, for a subject shape not frozen (without it, none).
-    pub fn new(g: &Gradient, aspect: f32, subject: Option<&Grid>) -> MaskShape {
+    /// `depth`: the photo's refined depth map (with the edge surfaces, when the scene knows them),
+    /// for depth shapes (without it they do nothing).
+    pub fn new(g: &Gradient, aspect: f32, subject: Option<&Grid>, depth: Option<&crate::scene::Refined>) -> MaskShape {
         MaskShape {
-            base: Comp::new(g, aspect, subject),
-            parts: g.parts.iter().map(|p| (p.subtract, p.shape.invert, Comp::new(&p.shape, aspect, subject))).collect(),
+            base: Comp::new(g, aspect, subject, depth),
+            parts: g.parts.iter().map(|p| (p.subtract, p.shape.invert, Comp::new(&p.shape, aspect, subject, depth))).collect(),
             invert: g.invert,
             aspect,
         }
@@ -424,6 +511,17 @@ pub fn needs_subject(g: &Gradient) -> bool {
     live(g) || g.parts.iter().any(|p| live(&p.shape))
 }
 
+/// Whether a mask needs the photo's depth map (a depth shape in it).
+pub fn needs_depth(g: &Gradient) -> bool {
+    let live = |s: &Gradient| s.kind == Kind::Depth;
+    live(g) || g.parts.iter().any(|p| live(&p.shape))
+}
+
+/// Whether any of a photo's masks needs its depth map.
+pub fn any_needs_depth(list: &[Gradient]) -> bool {
+    list.iter().any(needs_depth)
+}
+
 /// The photo's gradients, ready to render.
 pub struct Prepared<'a> {
     pub(crate) list: &'a [Gradient],
@@ -432,14 +530,16 @@ pub struct Prepared<'a> {
 
 impl<'a> Prepared<'a> {
     /// `subject`: the photo's subject mask, for subject masks (without it they do nothing).
-    pub fn new(list: &'a [Gradient], width: usize, height: usize, subject: Option<&Grid>) -> Option<Self> {
+    /// `depth`: its refined depth map (with the edge surfaces, when the scene knows them), for
+    /// depth masks.
+    pub fn new(list: &'a [Gradient], width: usize, height: usize, subject: Option<&Grid>, depth: Option<&crate::scene::Refined>) -> Option<Self> {
         let used = |g: &Gradient| {
             [g.exposure, g.temperature, g.tint, g.contrast, g.highlights, g.shadows, g.whites, g.blacks, g.texture, g.clarity, g.dehaze, g.saturation]
                 .iter()
                 .any(|&v| v != 0.0)
         };
         let aspect = width as f32 / height.max(1) as f32;
-        list.iter().any(used).then(|| Prepared { list, masks: list.iter().map(|g| MaskShape::new(g, aspect, subject)).collect() })
+        list.iter().any(used).then(|| Prepared { list, masks: list.iter().map(|g| MaskShape::new(g, aspect, subject, depth)).collect() })
     }
 
     /// Amounts at pixel `i` of a `w` x `h` image.
@@ -663,12 +763,12 @@ mod combine_tests {
         let circle = Gradient { kind: Kind::Radial, centre: [0.8, 0.5], rx: 0.1, ry: 0.15, feather: 0.0, ..Default::default() };
         let hole = Gradient { kind: Kind::Radial, centre: [0.05, 0.5], rx: 0.04, ry: 0.06, feather: 0.0, ..Default::default() };
         let g = Gradient { parts: vec![Part { subtract: false, shape: circle }, Part { subtract: true, shape: hole }], ..left };
-        let m = MaskShape::new(&g, 1.5, None);
+        let m = MaskShape::new(&g, 1.5, None, None);
         assert!(m.at(0.8, 0.5) > 0.99, "the added circle");
         assert!(m.at(0.05, 0.5) < 0.01, "the subtracted hole");
         assert!(m.at(0.15, 0.2) > 0.5, "the linear part");
         assert!(m.at(0.6, 0.9) < 0.01, "neither");
-        let inv = MaskShape::new(&Gradient { invert: true, ..g }, 1.5, None);
+        let inv = MaskShape::new(&Gradient { invert: true, ..g }, 1.5, None, None);
         assert!(inv.at(0.6, 0.9) > 0.99 && inv.at(0.8, 0.5) < 0.01, "inverted as a whole");
     }
 
@@ -678,5 +778,68 @@ mod combine_tests {
         let back = Grid::from_png_base64(&grid.to_png_base64(1024).unwrap()).unwrap();
         assert_eq!((back.w, back.h), (4, 2));
         assert!((back.at(0.375, 0.5) - 1.0).abs() < 0.01 && back.at(0.0, 0.5) < 0.01);
+    }
+
+    /// Depth values 0..1 (1 = nearest) across a grid, 0.05 apart.
+    fn depth_grid() -> Grid {
+        let data: Vec<f32> = (0..20 * 5).map(|i| (i % 20) as f32 / 19.0).collect();
+        Grid { w: 20, h: 5, data }
+    }
+
+    #[test]
+    fn a_depth_band_is_flat_inside_and_fades_either_side() {
+        let d = depth_grid();
+        let band = d.depth_band(0.8, 0.4, 0.2);
+        assert!((band.at(0.5, 0.5) - 1.0).abs() < 1e-4, "full inside the band");
+        // Left of the grid is farthest (depth 0), right nearest (depth 1).
+        assert!(band.at(0.01, 0.5) < 1e-4, "nothing beyond Far");
+        assert!(band.at(0.99, 0.5) < 1e-4, "nothing beyond Near");
+        // Half way through the fade above Near (depth 0.9): half.
+        let half = band.at(0.88, 0.5);
+        assert!((half - 0.5).abs() < 0.05, "{half}");
+        // A fade of 0 is a hard edge, and swapped ends still make the same band.
+        let hard = d.depth_band(0.8, 0.4, 0.0);
+        assert!((hard.at(0.5, 0.5) - 1.0).abs() < 1e-4 && hard.at(0.0, 0.5) < 1e-4);
+        let swapped = d.depth_band(0.4, 0.8, 0.0);
+        assert_eq!(hard.data, swapped.data);
+    }
+
+    /// A photo's depth field for the mask tests: the control map, with no edge surfaces.
+    fn field(control: &Grid) -> crate::scene::Refined {
+        crate::scene::Refined { control: std::sync::Arc::new(control.clone()), sky: None, edges: None, anchors: None, focal_px: None, ground: None, normals: None }
+    }
+
+    #[test]
+    fn a_depth_mask_is_flat_in_the_band_and_works_as_a_part() {
+        let control = depth_grid();
+        let depth = field(&control);
+        let g = Gradient { kind: Kind::Depth, near: 1.0, far: 0.6, fade: 0.05, exposure: 1.0, ..Default::default() };
+        let m = MaskShape::new(&g, 1.5, None, Some(&depth));
+        assert!(m.at(0.9, 0.5) > 0.99 && m.at(0.7, 0.5) > 0.99, "the near band");
+        assert!(m.at(0.05, 0.5) < 0.01, "the back");
+        // Invert puts it on the back; without a depth map it does nothing.
+        let inv = MaskShape::new(&Gradient { invert: true, ..g.clone() }, 1.5, None, Some(&depth));
+        assert!(inv.at(0.05, 0.5) > 0.99 && inv.at(0.7, 0.5) < 0.01);
+        assert_eq!(MaskShape::new(&g, 1.5, None, None).at(0.7, 0.5), 0.0);
+        // As a shape subtracted from a linear mask, and needed by `needs_depth`.
+        let with_part = Gradient { kind: Kind::Linear, full: [0.0, 0.5], zero: [0.9, 0.5], parts: vec![Part { subtract: true, shape: g.clone() }], ..Default::default() };
+        let m = MaskShape::new(&with_part, 1.5, None, Some(&depth));
+        assert!(m.at(0.75, 0.5) < 0.01, "the depth band taken away");
+        assert!(m.at(0.3, 0.5) > 0.5, "the rest kept");
+        assert!(needs_depth(&with_part) && !needs_depth(&Gradient::default()));
+    }
+
+    #[test]
+    fn an_old_file_without_the_depth_fields_still_loads() {
+        let old = r#"{"kind":"linear","full":[0.2,0.1],"zero":[0.8,0.9],"feather":50,"invert":false,"exposure":0.5}"#;
+        let g: Gradient = serde_json::from_str(old).unwrap();
+        assert_eq!((g.near, g.far, g.fade), (1.0, 0.5, 0.1));
+        assert_eq!(g.exposure, 0.5);
+        // And a depth mask saves and loads with its band.
+        let d = Gradient { kind: Kind::Depth, near: 0.7, far: 0.2, fade: 0.3, ..Default::default() };
+        let json = serde_json::to_string(&d).unwrap();
+        assert!(json.contains("\"kind\":\"depth\""), "{json}");
+        let back: Gradient = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, d);
     }
 }

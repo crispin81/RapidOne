@@ -130,6 +130,18 @@
   color: #050505 !important;
 }
 
+/* Keyboard focus: underlined, as on the Cull | Edit | Retouch switch (the
+   app-wide rounded outline gets clipped by the hexagon). */
+.strip-filter .viewswitch__option:focus-visible {
+  outline: none;
+  text-decoration: underline 1px;
+  text-underline-offset: 1px;
+}
+
+.strip-filter .viewswitch__option:focus-visible:not(.viewswitch__option--on):not(:disabled) {
+  color: #3ee6ff;
+}
+
 @media (prefers-reduced-motion: reduce) {
 .strip-filter .viewswitch__slider {
     transition: none;

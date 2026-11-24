@@ -46,7 +46,12 @@ export default function ViewSwitch({ view, views, onView }: { view: FolderView; 
           aria-selected={v.id === view}
           disabled={(v.id === "rated" && !views.rated) || (v.id === "unrated" && !views.unrated)}
           className={`viewswitch__option${v.id === view ? " viewswitch__option--on" : ""}`}
-          onClick={() => onView(v.id)}
+          onClick={(e) => {
+            // As on the Cull | Edit | Retouch switch: a mouse click leaves no focus behind
+            // for the photo keys to light up. Tab / Enter keep focus as usual.
+            if (e.detail > 0) e.currentTarget.blur();
+            onView(v.id);
+          }}
           title={v.id === "all" ? "All: rated and unrated together, by capture time" : `Only the ${v.id} folder`}
         >
           {v.label}

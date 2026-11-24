@@ -21,7 +21,7 @@
 //!
 //! The model files sit in the models folder (`mask::find_model`), never in git.
 
-use image::{GrayImage, Luma, Rgb, RgbImage};
+use image::{GrayImage, Luma, Rgb, RgbImage, Rgba, RgbaImage};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
@@ -35,8 +35,6 @@ const DINO_SCORE: f32 = 0.35;
 const DINO_MAX: usize = 8;
 const ENCODER_FILE: &str = "mobile_sam_image_encoder.onnx";
 const DECODER_FILE: &str = "sam_mask_decoder_multi.onnx";
-/// The subject (people) mask, so a box's outline keeps them out of the hole.
-const SUBJECT_FILE: &str = "birefnet-lite.onnx";
 /// In an outline file: 255 = remove, PROTECT = a person next to it, which
 /// the fill must not grow into; 0 = anything else.
 pub const PROTECT: u8 = 128;
@@ -48,7 +46,10 @@ const SAM_SIDE: f32 = 1024.0;
 fn session(file: &str) -> Option<ort::session::Session> {
     let path = crate::mask::find_model(file)?;
     let env = crate::mask::ort_env()?;
-    ort::session::Session::builder(env).ok()?.commit_from_file(path).ok()
+    // On the CPU, as Lite was built to run (ortgpu's CPU path). ort's own default on a Mac is CoreML with
+    // the Neural Engine, whose compile of LaMa, MobileSAM and BiRefNet never finished on the Mac Studio
+    // (Remove sat on "Finding it…", 24 Nov). Linux/Windows unchanged.
+    crate::ortgpu::build(env, &path, None)
 }
 
 fn lama() -> Option<&'static Mutex<ort::session::Session>> {
@@ -210,9 +211,11 @@ pub fn find_words(picture: &Path, words: &str) -> Result<Vec<([f32; 4], f32)>, S
     Ok(kept)
 }
 
+/// The subject masks' own BiRefNet session (mask.rs), shared: a second session of the same model running
+/// at the same moment on the Mac's CPU failed in both ("GetElementType is not implemented", 24 Nov), and
+/// it saves loading the model twice.
 fn subject_session() -> Option<&'static Mutex<ort::session::Session>> {
-    static S: OnceLock<Option<Mutex<ort::session::Session>>> = OnceLock::new();
-    S.get_or_init(|| session(SUBJECT_FILE).map(Mutex::new)).as_ref()
+    crate::mask::session()
 }
 
 /// The last picture's subject mask (BiRefNet, people and other main
@@ -285,6 +288,7 @@ fn embedding(picture: &Path) -> Result<((u32, u32), f32, Vec<f32>), String> {
     }
     let img = image::open(picture).map_err(|e| e.to_string())?.to_rgb8();
     let (w, h) = img.dimensions();
+    let t0 = std::time::Instant::now();
     let s = SAM_SIDE / w.max(h) as f32;
     let (sw, sh) = (((w as f32 * s).round() as u32).max(1), ((h as f32 * s).round() as u32).max(1));
     let small = image::imageops::resize(&img, sw, sh, image::imageops::FilterType::Triangle);
@@ -297,6 +301,7 @@ fn embedding(picture: &Path) -> Result<((u32, u32), f32, Vec<f32>), String> {
     let out = sam.0.run(ort::inputs!["input_image" => tensor]).map_err(|e| e.to_string())?;
     let (_, emb) = out[0].try_extract_tensor::<f32>().map_err(|e| e.to_string())?;
     let emb = emb.to_vec();
+    eprintln!("lite: MobileSAM embedding {:.2} s", t0.elapsed().as_secs_f32());
     *held = Some((picture.to_path_buf(), (w, h), s, emb.clone()));
     Ok(((w, h), s, emb))
 }
@@ -319,13 +324,21 @@ pub fn prepare(picture: &Path) -> Result<(), String> {
     if !can_outline() {
         return Ok(());
     }
-    embedding(picture).map(|_| ())
+    let ((w, h), _, _) = embedding(picture)?;
+    // The subject too (BiRefNet, kept per picture): every outline checks it, and on the CPU it's
+    // seconds, so the first box drawn shouldn't wait for it (Chris, 24 Nov: selection slow on the Mac).
+    let t = std::time::Instant::now();
+    let _ = subject(picture, w, h);
+    eprintln!("lite: subject ready in {:.2} s", t.elapsed().as_secs_f32());
+    Ok(())
 }
 
 /// The object in `bbox` (pixels of `picture`): a white-on-black mask the
 /// picture's size, and the mask's own bounding box; None if nothing's there.
 pub fn outline(picture: &Path, bbox: [f32; 4]) -> Result<Option<(GrayImage, [f32; 4])>, String> {
+    let t0 = std::time::Instant::now();
     let ((w, h), s, emb) = embedding(picture)?;
+    let t_emb = t0.elapsed().as_secs_f32();
     let sam = sam().ok_or("MobileSAM isn't installed")?;
     let mut sam = sam.lock().map_err(|_| "busy")?;
     let t = |shape: Vec<usize>, v: Vec<f32>| ort::value::Tensor::from_array((shape, v.into_boxed_slice())).map_err(|e| e.to_string());
@@ -350,6 +363,7 @@ pub fn outline(picture: &Path, bbox: [f32; 4]) -> Result<Option<(GrayImage, [f32
         return Err("MobileSAM gave an odd mask".into());
     }
     drop(sam);
+    let t_dec = t0.elapsed().as_secs_f32();
     // MobileSAM offers several outlines (17 Oct, the sign behind the bride's
     // head: one was the sign and its post, others took her head too). Pick
     // the one that best fits the box and keeps off the photo's subject, and
@@ -357,6 +371,7 @@ pub fn outline(picture: &Path, bbox: [f32; 4]) -> Result<Option<(GrayImage, [f32
     // most outlines are mostly subject, the box is round a person and the
     // fullest outline is taken instead).
     let subj = subject(picture, w, h);
+    let t_subj = t0.elapsed().as_secs_f32();
     let (bx0, by0, bx1, by1) = (bbox[0].max(0.0) as u32, bbox[1].max(0.0) as u32, (bbox[2] as u32).min(w), (bbox[3] as u32).min(h));
     let box_area = ((bx1.saturating_sub(bx0)) * (by1.saturating_sub(by0))).max(1) as f32;
     let stats: Vec<(f32, f32, f32, f32)> = (0..count)
@@ -408,6 +423,13 @@ pub fn outline(picture: &Path, bbox: [f32; 4]) -> Result<Option<(GrayImage, [f32
             y1 = y1.max(y);
         }
     }
+    eprintln!(
+        "lite: outline {:.2} s (embedding {t_emb:.2}, MobileSAM {:.2}, subject {:.2}, choosing {:.2})",
+        t0.elapsed().as_secs_f32(),
+        t_dec - t_emb,
+        t_subj - t_dec,
+        t0.elapsed().as_secs_f32() - t_subj
+    );
     if x0 == u32::MAX {
         return Ok(None);
     }
@@ -419,7 +441,7 @@ pub fn outline(picture: &Path, bbox: [f32; 4]) -> Result<Option<(GrayImage, [f32
 /// `seed` varies the result (Try again): the hole grown a little more each time.
 /// `protect` (if given): pixels the grown hole must not reach (a person
 /// beside what's removed).
-pub fn fill(picture: &RgbImage, hole: &[bool], protect: Option<&[bool]>, seed: u32) -> Result<RgbImage, String> {
+pub fn fill(picture: &RgbImage, hole: &[bool], protect: Option<&[bool]>, seed: u32) -> Result<RgbaImage, String> {
     let (w, h) = picture.dimensions();
     let (wu, hu) = (w as usize, h as usize);
     // Grown a little (edges and shadows of the object), more on each retry.
@@ -467,20 +489,92 @@ pub fn fill(picture: &RgbImage, hole: &[bool], protect: Option<&[bool]>, seed: u
     Ok(composite(picture, &filled, &hole, (grow / 2).max(2)))
 }
 
-/// `filled` (the same size as `picture`) inside `hole`, the picture exactly
-/// everywhere else, blended over `soft` pixels at the hole's edge.
-pub fn composite(picture: &RgbImage, filled: &RgbImage, hole: &[bool], soft: usize) -> RgbImage {
+/// `filled` (the same size as `picture`) inside `hole` and over `soft` pixels round it, with
+/// how much of it to use in the alpha: 255 in the hole, fading to 0 outside it. Elsewhere the
+/// colour is the picture's and the alpha 0, so whoever lays it over the photo keeps the photo's
+/// own pixels there (21 Nov: a removal applied as an opaque rectangle put a copy of the photo,
+/// shrunk to the model's size, round the fill, and its edge showed as a line at full size).
+pub fn composite(picture: &RgbImage, filled: &RgbImage, hole: &[bool], soft: usize) -> RgbaImage {
     let (w, h) = picture.dimensions();
     let (wu, hu) = (w as usize, h as usize);
     let weight: Vec<f32> = blur(&hole.iter().map(|&b| if b { 1.0 } else { 0.0 }).collect::<Vec<f32>>(), wu, hu, soft);
-    RgbImage::from_fn(w, h, |x, y| {
+    RgbaImage::from_fn(w, h, |x, y| {
         let i = y as usize * wu + x as usize;
         let k = if hole[i] { 1.0 } else { weight[i] };
-        let (a, b) = (picture.get_pixel(x, y).0, filled.get_pixel(x, y).0);
-        Rgb(std::array::from_fn(|c| (a[c] as f32 * (1.0 - k) + b[c] as f32 * k).round() as u8))
+        let a = (k * 255.0).round() as u8;
+        let p = if a > 0 { filled.get_pixel(x, y).0 } else { picture.get_pixel(x, y).0 };
+        Rgba([p[0], p[1], p[2], a])
     })
 }
 
+
+/// Distance (pixels, chamfer 3-4: within ~3% of Euclidean) from each pixel to the nearest
+/// pixel of `mask`; 0 on it. Without any mask pixel, everything is f32::MAX.
+pub fn distance_from(mask: &[bool], w: usize, h: usize) -> Vec<f32> {
+    let big = f32::MAX / 4.0;
+    let mut d: Vec<f32> = mask.iter().map(|&m| if m { 0.0 } else { big }).collect();
+    let (a, b) = (1.0f32, 1.3333f32);
+    for y in 0..h {
+        for x in 0..w {
+            let i = y * w + x;
+            let mut v = d[i];
+            if x > 0 { v = v.min(d[i - 1] + a); }
+            if y > 0 {
+                v = v.min(d[i - w] + a);
+                if x > 0 { v = v.min(d[i - w - 1] + b); }
+                if x + 1 < w { v = v.min(d[i - w + 1] + b); }
+            }
+            d[i] = v;
+        }
+    }
+    for y in (0..h).rev() {
+        for x in (0..w).rev() {
+            let i = y * w + x;
+            let mut v = d[i];
+            if x + 1 < w { v = v.min(d[i + 1] + a); }
+            if y + 1 < h {
+                v = v.min(d[i + w] + a);
+                if x + 1 < w { v = v.min(d[i + w + 1] + b); }
+                if x > 0 { v = v.min(d[i + w - 1] + b); }
+            }
+            d[i] = v;
+        }
+    }
+    if mask.iter().any(|&m| m) { d } else { vec![f32::MAX; w * h] }
+}
+
+/// `filled` over `picture` by distance from the object (`core`, the hole before growing):
+/// alpha 255 out to `full` pixels from it, then a smooth fall to 0 at `zero`, and 0 on
+/// `protect`. The fill is made for the hole grown past `full` (so the object's edges go),
+/// and the fade happens inside that growth: the alpha never jumps (21 Nov, P1368513: the
+/// blurred-hole alpha of `composite` went from ~120 to 255 at the grown hole's edge, a hard
+/// line where the GPU fill's smooth floor met the grainy paving).
+pub fn composite_ramp(picture: &RgbImage, filled: &RgbImage, core: &[bool], protect: Option<&[bool]>, full: f32, zero: f32) -> RgbaImage {
+    let (w, h) = picture.dimensions();
+    let d = distance_from(core, w as usize, h as usize);
+    let span = (zero - full).max(1.0);
+    let mut k: Vec<f32> = d
+        .iter()
+        .enumerate()
+        .map(|(i, &d)| {
+            if protect.is_some_and(|p| p[i]) {
+                return 0.0;
+            }
+            let t = ((zero - d) / span).clamp(0.0, 1.0);
+            t * t * (3.0 - 2.0 * t)
+        })
+        .collect();
+    // Soften the cut along protected pixels (the ramp itself is already smooth).
+    if protect.is_some() {
+        k = blur(&k, w as usize, h as usize, 2);
+    }
+    RgbaImage::from_fn(w, h, |x, y| {
+        let i = y as usize * w as usize + x as usize;
+        let a = (k[i] * 255.0).round() as u8;
+        let p = if a > 0 { filled.get_pixel(x, y).0 } else { picture.get_pixel(x, y).0 };
+        Rgba([p[0], p[1], p[2], a])
+    })
+}
 
 /// A box blur of radius r, twice (close to a Gaussian).
 fn blur(v: &[f32], w: usize, h: usize, r: usize) -> Vec<f32> {
@@ -515,4 +609,35 @@ fn blur(v: &[f32], w: usize, h: usize, r: usize) -> Vec<f32> {
         x = pass(&x, false);
     }
     x
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_ramp_is_full_near_the_object_and_smooth_after() {
+        let (w, h) = (100u32, 10u32);
+        let core: Vec<bool> = (0..w * h).map(|i| i % w >= 60).collect();
+        let pic = RgbImage::new(w, h);
+        let out = composite_ramp(&pic, &pic, &core, None, 10.0, 30.0);
+        let row: Vec<i32> = (0..w).map(|x| out.get_pixel(x, 5)[3] as i32).collect();
+        assert_eq!(row[60], 255);
+        assert_eq!(row[50], 255); // 10 px out: still full
+        assert_eq!(row[29], 0); // 31 px out: none
+        let biggest = row.windows(2).map(|p| (p[1] - p[0]).abs()).max().unwrap();
+        assert!(biggest <= 25, "alpha jumps by {biggest}: {row:?}");
+    }
+
+    #[test]
+    fn distance_is_close_to_euclidean() {
+        let (w, h) = (61usize, 61usize);
+        let mut m = vec![false; w * h];
+        m[30 * w + 30] = true;
+        let d = distance_from(&m, w, h);
+        for (x, y) in [(60usize, 30usize), (30, 0), (60, 60), (50, 40)] {
+            let e = (((x as f32 - 30.0).powi(2) + (y as f32 - 30.0).powi(2)) as f32).sqrt();
+            assert!((d[y * w + x] - e).abs() / e < 0.06, "{x},{y}: {} vs {e}", d[y * w + x]);
+        }
+    }
 }

@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { Pipette } from "lucide-react";
 import "../picker.css";
 
-export type PickerKind = "wb" | "fringe";
+export type PickerKind = "wb" | "fringe" | "focus" | "mistStart" | "sun" | "light";
 
 interface Props {
   kind: PickerKind;
@@ -17,6 +17,10 @@ interface Props {
 const HINTS: Record<PickerKind, string> = {
   wb: "White balance: click something that should be neutral grey or white",
   fringe: "Defringe: click a purple or green fringe along an edge",
+  focus: "Bokeh focus: click what should be in focus",
+  mistStart: "Mist end: click how near the fog should come",
+  sun: "Mist sun: click (or just outside the photo) where the glow comes from",
+  light: "Relight: click where the selected light should sit",
 };
 
 /**

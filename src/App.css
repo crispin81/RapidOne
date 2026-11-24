@@ -1471,6 +1471,13 @@ button.grade__range:not(:disabled):hover {
 .vslider--compact {
   width: 26px;
 }
+/* Two points: room for both names (and both numbers above). */
+.vslider--range {
+  width: 54px;
+}
+.vslider--range.vslider--compact {
+  width: 38px;
+}
 
 /* Curves (after Definition; also does the job of Levels) */
 .curves {
@@ -1924,7 +1931,8 @@ button:not(:disabled):hover {
   bottom: 3px;
   left: 3px;
   width: calc((100% - 6px) / 3);
-  clip-path: polygon(8px 0, calc(100% - 8px) 0, 100% 50%, calc(100% - 8px) 100%, 8px 100%, 0 50%);
+  /* 9px ends run parallel to the outer 11px ends (inset 3px, 6px shorter), so the gap round the point stays even. */
+  clip-path: polygon(9px 0, calc(100% - 9px) 0, 100% 50%, calc(100% - 9px) 100%, 9px 100%, 0 50%);
   background: linear-gradient(180deg, #5ff0ff, #1fb8d0);
   box-shadow: 0 0 12px rgba(62, 230, 255, 0.6);
   transition: transform 0.28s cubic-bezier(0.3, 0.8, 0.3, 1);
@@ -1952,6 +1960,18 @@ button:not(:disabled):hover {
 
 .modeswitch__option--on {
   color: #050505 !important;
+}
+
+/* Keyboard focus: the app-wide outline is a rounded box, which the hexagon
+   clips into a stray second edge round the slider. Underline the name instead. */
+.modeswitch__option:focus-visible {
+  outline: none;
+  text-decoration: underline 1px;
+  text-underline-offset: 3px;
+}
+
+.modeswitch__option:focus-visible:not(.modeswitch__option--on) {
+  color: #3ee6ff;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2248,6 +2268,50 @@ button:not(:disabled):hover {
   cursor: crosshair;
 }
 
+/* A removal's pin (RemoveOverlay): its number; orange with an x on hover, click undoes it. */
+.removepin {
+  position: absolute;
+  z-index: 3;
+  /* 28 px (was 20): with several removals the pointer hid most of a 20 px pin, so its x on hover
+     wasn't seen until clicked (Chris, 24 Nov). Hover also grows it a little, out from under the pointer. */
+  width: 28px;
+  height: 28px;
+  margin: -14px 0 0 -14px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 2px solid #3ee6ff !important;
+  border-radius: 50%;
+  background: rgba(5, 12, 16, 0.78) !important;
+  color: #3ee6ff;
+  font-family: "Exo 2", system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 0 6px rgba(62, 230, 255, 0.45);
+  transition: transform 0.1s ease-out;
+}
+.removepin__n {
+  line-height: 1;
+}
+/* An icon, not the text "x": exactly centred in the circle. */
+.removepin__x {
+  display: none;
+}
+.removepin:hover {
+  transform: scale(1.25);
+  z-index: 4;
+  border-color: rgb(255, 122, 26) !important;
+  color: rgb(255, 122, 26);
+  box-shadow: 0 0 8px rgba(255, 122, 26, 0.6);
+}
+.removepin:hover .removepin__n {
+  display: none;
+}
+.removepin:hover .removepin__x {
+  display: block;
+}
+
 .remove-box {
   position: absolute;
   border: 2px solid #3ee6ff;
@@ -2299,6 +2363,15 @@ button:not(:disabled):hover {
   align-items: center;
   gap: 6px;
   color: #a6dde9;
+}
+
+/* GPU (Smarter)'s download failed: why, in the bar (the whole message on hover). */
+.removebar__dlerror {
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #ff8a8a;
 }
 
 .spin {
@@ -2367,6 +2440,94 @@ button:not(:disabled):hover {
 .removebar__tools .is-on {
   border-color: #3ee6ff;
   color: #3ee6ff;
+}
+
+/* Remove's CPU | GPU switch: a small two-way version of the mode switch (hexagonal
+   ends, a lit slider that glides to the chosen side). */
+.removeswitch {
+  --notch: 7px;
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: repeat(2, 92px); /* equal halves for the slider; fits "GPU (Smarter)" (21 Nov) */
+  flex-shrink: 0;
+  padding: 2px;
+  clip-path: polygon(var(--notch) 0, calc(100% - var(--notch)) 0, 100% 50%, calc(100% - var(--notch)) 100%, var(--notch) 100%, 0 50%);
+  background: linear-gradient(180deg, #1a4552, #0e2a33);
+}
+
+.removeswitch::before {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  clip-path: polygon(calc(var(--notch) - 0.5px) 0, calc(100% - var(--notch) + 0.5px) 0, 100% 50%, calc(100% - var(--notch) + 0.5px) 100%, calc(var(--notch) - 0.5px) 100%, 0 50%);
+  background: linear-gradient(180deg, #151515, #070707);
+}
+
+.removeswitch__slider {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 6px) / 2);
+  clip-path: polygon(5px 0, calc(100% - 5px) 0, 100% 50%, calc(100% - 5px) 100%, 5px 100%, 0 50%);
+  background: linear-gradient(180deg, #5ff0ff, #1fb8d0);
+  box-shadow: 0 0 10px rgba(62, 230, 255, 0.6);
+  transition: transform 0.24s cubic-bezier(0.3, 0.8, 0.3, 1);
+}
+
+.removeswitch__option {
+  position: relative;
+  justify-content: center;
+  padding: 3px 6px; /* a margin before the button's edge (Chris, 21 Nov) */
+  white-space: nowrap;
+  border: none !important;
+  background: none !important;
+  box-shadow: none !important;
+  color: #8a8b96;
+  font-family: "Exo 2", system-ui, sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  transition: color 0.2s ease;
+}
+
+/* GPU OFF: the CPU side while GPU (Smarter) holds the graphics card. */
+.removeswitch__option--gpuoff {
+  color: #ff4d4d !important;
+  text-shadow: 0 0 6px rgba(255, 77, 77, 0.6);
+}
+
+.removeswitch__option:hover:not(.removeswitch__option--on):not(:disabled) {
+  color: rgb(255, 150, 70) !important;
+}
+
+.removeswitch__option--on {
+  color: #050505 !important;
+}
+
+.removeswitch__option:disabled:not(.removeswitch__option--on) {
+  color: #4a4b52;
+}
+
+.removeswitch__option:focus-visible {
+  outline: none;
+  text-decoration: underline 1px;
+  text-underline-offset: 3px;
+}
+
+/* GPU while its model downloads: fills left to right with the progress gradient (as the Style
+   button does), the percentage on top. */
+.removeswitch__option--fetching {
+  color: #ffffff !important;
+  background: linear-gradient(90deg, rgba(255, 122, 26, 0.6), rgba(62, 230, 255, 0.6)) no-repeat !important;
+  background-size: var(--fill, 0%) 100% !important;
+  transition: background-size 0.4s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .removeswitch__slider {
+    transition: none;
+  }
 }
 
 /* Legacy (Lightroom) vignette: icon on the Effects panel and its pop-up. */
@@ -2529,6 +2690,309 @@ button:not(:disabled):hover {
   color: #e6f9ff;
   font-variant-numeric: tabular-nums;
 }
+
+/* A depth mask's band: near on the left, far on the right, warm to cool as the depth picture is. */
+.gradientbar__slider--depth {
+  gap: 6px;
+}
+
+/* The Depth quality setting (Standard / High), in the depth mask's bar: the two modes, and the
+   High quality model's download when it isn't here yet (offer, then progress). */
+.depthquality {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #a6dde9;
+}
+
+.depthquality__modes {
+  display: inline-flex;
+  border: 1px solid rgba(var(--neon), 0.35);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.depthquality__modes button {
+  padding: 1px 7px;
+  border: 0;
+  background: transparent;
+  color: #a6dde9;
+  font: inherit;
+}
+
+.depthquality__modes button.is-on {
+  background: rgba(var(--neon), 0.18);
+  color: #e9fbff;
+}
+
+.depthquality__modes button:hover {
+  color: rgb(255, 122, 26);
+}
+
+.depthquality__offer {
+  padding: 1px 7px;
+  border: 1px solid rgba(var(--neon), 0.55);
+  border-radius: 3px;
+  background: transparent;
+  color: #3ee6ff;
+  font: inherit;
+}
+
+.depthquality__offer:hover {
+  border-color: rgb(255, 122, 26);
+  color: rgb(255, 122, 26);
+}
+
+.depthquality__progress,
+.depthquality__error {
+  color: #e9fbff;
+  font-variant-numeric: tabular-nums;
+}
+
+.depthquality__error {
+  color: rgb(255, 150, 120);
+}
+
+.depthbar {
+  position: relative;
+  width: 150px;
+  height: 14px;
+  border: 1px solid rgba(var(--neon), 0.45);
+  border-radius: 3px;
+  background: linear-gradient(90deg, rgb(40, 74, 158), rgb(255, 176, 96));
+  cursor: ew-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.depthbar__band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(var(--neon), 0.22);
+  border-left: 1px solid rgba(var(--neon), 0.8);
+  border-right: 1px solid rgba(var(--neon), 0.8);
+  pointer-events: none;
+}
+
+.depthbar__handle {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 7px;
+  margin-left: -3.5px;
+  border-radius: 2px;
+  background: #e6f9ff;
+  box-shadow: 0 0 4px rgba(var(--neon), 0.8);
+  pointer-events: none;
+}
+
+.depthbar__handle.is-on {
+  background: #3ee6ff;
+}
+
+/* A depth band's distances in metres, beside the bar. */
+.depthbar__metres {
+  min-width: 92px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* The distance a depth Pick click landed on, by the pointer for a moment. */
+.depth-tip {
+  position: absolute;
+  transform: translate(-50%, -160%);
+  padding: 2px 6px;
+  border: 1px solid rgba(var(--neon), 0.5);
+  border-radius: 3px;
+  background: rgba(6, 14, 20, 0.82);
+  color: #e6f9ff;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* The Depth Scope (src/components/DepthScope.tsx): the photo as a 3D point cloud with the depth
+   mask's near and far planes in it. A floating panel over the photo, moved by its head and
+   resized by its corner. */
+.depthscope {
+  position: absolute;
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  min-width: 340px;
+  min-height: 260px;
+  border: 1px solid rgba(var(--neon), 0.55);
+  border-radius: 6px;
+  background: rgba(6, 10, 13, 0.95);
+  box-shadow: 0 0 12px rgba(var(--neon), 0.25);
+  color: #e6e6ea;
+  font-size: 12px;
+  cursor: default;
+  outline: none;
+  overflow: hidden;
+  pointer-events: auto;
+}
+
+.depthscope:focus-visible {
+  border-color: rgba(var(--neon), 0.9);
+  box-shadow: 0 0 14px rgba(var(--neon), 0.4);
+}
+
+.depthscope__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-bottom: 1px solid rgba(var(--neon), 0.25);
+  background: linear-gradient(180deg, rgba(var(--neon), 0.12), rgba(var(--neon), 0.02));
+  color: #3ee6ff;
+  cursor: move;
+  touch-action: none;
+}
+
+.depthscope__title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.depthscope__meta {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  opacity: 0.55;
+  font-size: 10.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.depthscope__tools {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.depthscope__tools button {
+  padding: 2px 6px;
+  border-color: rgba(var(--neon), 0.3);
+  font-size: 11px;
+}
+
+.depthscope__tools button.is-on {
+  border-color: rgba(var(--neon), 0.8);
+  background: rgba(var(--neon), 0.12);
+  color: #3ee6ff;
+}
+
+.depthscope__tools button:hover {
+  border-color: rgb(255, 122, 26);
+  color: rgb(255, 122, 26);
+}
+
+.depthscope__body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.depthscope__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  touch-action: none;
+}
+
+.depthscope__canvas:active {
+  cursor: grabbing;
+}
+
+/* A plane's distance, at its centre in 3D: drag it to move the plane. */
+.depthscope__label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 1px 6px;
+  border: 1px solid rgba(var(--neon), 0.7);
+  border-radius: 9px;
+  background: rgba(4, 12, 16, 0.78);
+  color: #bdf3ff;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: ns-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.depthscope__label:hover {
+  border-color: rgb(255, 122, 26);
+  color: rgb(255, 122, 26);
+}
+
+.depthscope__note {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(4, 8, 10, 0.86);
+  color: #a6dde9;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.depthscope__readout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  /* The corner's resize grip keeps its own place on the right. */
+  padding: 3px 18px 3px 8px;
+  border-top: 1px solid rgba(var(--neon), 0.22);
+  background: rgba(0, 0, 0, 0.35);
+  color: #a6dde9;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.depthscope__readout b {
+  color: #3ee6ff;
+  font-weight: 600;
+}
+
+.depthscope__dash {
+  opacity: 0.5;
+}
+
+.depthscope__cursor {
+  margin-left: auto;
+  color: #e6f9ff;
+}
+
+.depthscope__reset {
+  padding: 1px 6px;
+  border-color: rgba(var(--neon), 0.3);
+  font-size: 10.5px;
+}
+
+.depthscope__grip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  width: 14px;
+  height: 14px;
+  background: linear-gradient(135deg, transparent 44%, rgba(var(--neon), 0.75) 45%, rgba(var(--neon), 0.75) 55%, transparent 56%);
+  cursor: nwse-resize;
+  touch-action: none;
+}
+
 
 
 /* The top bar's tools are icons only; each one's name (and shortcut, where
@@ -3069,6 +3533,9 @@ button:not(:disabled):hover {
 .gradient-pin--subject {
   cursor: pointer;
 }
+.gradient-pin--depth {
+  cursor: pointer;
+}
 .gradient-pin__label {
   font-family: "Exo 2", system-ui, sans-serif;
   font-size: 10px;
@@ -3111,6 +3578,18 @@ button:not(:disabled):hover {
 .gradient-cursor .gradient-cursor__inner {
   stroke-dasharray: 3 3;
   opacity: 0.7;
+}
+/* A point hovered in the Depth Scope, marked where it is on the photo. */
+.scope-hover circle,
+.scope-hover line {
+  fill: none;
+  stroke: #3ee6ff;
+  stroke-width: 1.4;
+  pointer-events: none;
+}
+.scope-hover circle {
+  stroke-opacity: 0.9;
+  stroke-dasharray: 2 2;
 }
 .gradient-cursor--erase circle {
   stroke: rgb(255, 122, 26);
@@ -4330,4 +4809,1062 @@ button:not(:disabled):hover {
   color: #a6dde9;
   font-size: 12px;
   pointer-events: none;
+}
+
+/* ---- Creative: the RAW / Creative switch and its panels ------------------------------- */
+
+/* The switch: a narrow column right beside the first group, centred with the groups (its left
+   margin is auto, as the panel's first child). Text reads bottom to top. RAW shows today's panels unchanged. The top bar's Cull | Edit | Retouch switch
+   (.modeswitch) on its end: points above and below, its lit slider gliding down. */
+.panel-switch {
+  --notch: 9px;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  width: 26px;
+  clip-path: polygon(50% 0, 100% var(--notch), 100% calc(100% - var(--notch)), 50% 100%, 0 calc(100% - var(--notch)), 0 var(--notch));
+}
+.panel-switch::before {
+  clip-path: polygon(50% 0, 100% calc(var(--notch) - 0.5px), 100% calc(100% - var(--notch) + 0.5px), 50% 100%, 0 calc(100% - var(--notch) + 0.5px), 0 calc(var(--notch) - 0.5px));
+}
+.panel-switch .modeswitch__slider {
+  bottom: auto;
+  width: auto;
+  right: 3px;
+  height: calc((100% - 6px) / 2);
+  clip-path: polygon(50% 0, 100% 7px, 100% calc(100% - 7px), 50% 100%, 0 calc(100% - 7px), 0 7px);
+}
+/* The name is turned, not the button (a button's own writing-mode left WebKit's click area at the
+   top of its half): each half is clickable all over, its name in the middle. */
+.panel-switch .modeswitch__option {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+}
+.panel-switch .modeswitch__option span {
+  flex-shrink: 0;
+  transform: rotate(-90deg);
+  white-space: nowrap;
+}
+.panel__set {
+  display: contents;
+}
+.panel__set[hidden] {
+  display: none;
+}
+/* A group hidden by React (`hidden`): display:flex above would otherwise win over the browser's
+   own hidden style (People Mask without a subject). */
+.panel__group[hidden] {
+  display: none;
+}
+.panel__set > * {
+  flex-shrink: 0;
+}
+.panel__set > :last-child {
+  margin-right: auto;
+}
+
+/* Creative panels: compact, same frame and sliders as the RAW groups. Width as the RAW groups have
+   it — as wide as the content needs, with each panel's own floor (`min-width`) and no ceiling. */
+.panel__group--creative {
+  min-width: 188px;
+}
+.panel__group--creative[data-group="Depth"] {
+  min-width: 320px;
+}
+.panel__group--creative[data-group="Bokeh"] {
+  min-width: 296px;
+}
+.panel__group--creative[data-group="Mist"] {
+  min-width: 388px;
+}
+/* Relight: the 3D space on the left and one row of sliders on the right. The floor is the space's
+   own 320 px plus the selected light's six sliders and Ambient (7 × 34) with the gaps, so the space
+   stays usable without a second row of sliders; no ceiling, as the other creative groups. */
+.panel__group--creative[data-group="Relight"] {
+  min-width: 640px;
+}
+/* Relight's body: the 3D space on the left, its sliders on the right (one flex row), as Chris
+   asked (23 Nov): above the sliders, the space was too small. */
+.creative-relight {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  /* Fill what the group has left: the groups stretch to the dock's height, so the space gets as
+     tall as the panel instead of stopping at its 150 px floor. */
+  flex: 1 1 auto;
+  min-height: 150px;
+}
+.creative-scope--relight {
+  position: relative;
+  flex: 1 1 400px;
+  width: auto;
+  min-width: 340px;
+  min-height: 150px;
+  margin: 0;
+  overflow: hidden;
+}
+.creative-relight__controls {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+/* Undocked: the space is floating over the photo, so its box here holds the way back. */
+.creative-scope--redock {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.panel__group--creative .panel__sliders > .vslider,
+.panel__group--creative .panel__sliders > .vslider-off {
+  flex-shrink: 0;
+}
+.creative-enable {
+  margin-left: auto;
+  font-size: 10.5px;
+}
+.creative-status {
+  max-width: 220px;
+  margin: 2px 0 3px;
+  overflow: hidden;
+  color: #9fc9d3;
+  font-size: 10.5px;
+  line-height: 13px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.creative-status__busy {
+  color: #3ee6ff;
+}
+.creative-problem {
+  display: block;
+  margin-top: 2px;
+  color: #ff9a63;
+  font-size: 10px;
+}
+.creative-lens {
+  max-width: 220px;
+  margin: 1px 0 3px;
+  overflow: hidden;
+  color: #a6dde9;
+  font-size: 10.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.creative-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin: 2px 0 3px;
+}
+.creative-buttons button {
+  padding: 2px 5px;
+  border: 1px solid rgba(var(--neon), 0.28);
+  border-radius: 4px;
+  background: #0b0b0b;
+  color: #9fc9d3;
+  font-family: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+.creative-buttons button:hover {
+  border-color: rgb(255, 122, 26);
+  color: rgb(255, 122, 26);
+}
+.creative-buttons button.is-on {
+  border-color: #3ee6ff;
+  background: rgba(62, 230, 255, 0.14);
+  color: #3ee6ff;
+}
+.light-icon {
+  display: block;
+  flex-shrink: 0;
+}
+
+/* Relight's own 3D space: the cloud and its lighting points, nothing else.
+   Absolutely placed inside its box (as DepthScope's docked body is): the canvas' own pixel size
+   must never feed back into the layout. Before, the box grew with the canvas and the canvas with
+   the box, doubling every measure until the dock was 33,554,420 px wide (dev log, 23 Nov). */
+.relight-scope {
+  position: absolute;
+  inset: 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  cursor: grab;
+}
+.relight-scope__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 4px;
+}
+/* The gizmo over the cloud: rings to turn the light, coloured arrows to move it in 3D. */
+.relight-gizmo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.relight-gizmo__ring path {
+  fill: none;
+  stroke-width: 1.8;
+  pointer-events: none;
+}
+/* The ring itself is thin; this invisible path is the grab area. The yaw ring lies almost flat on
+   the screen, so its band is generous and it paints above the axis arrows. */
+.relight-gizmo__ring .relight-gizmo__ring-hit {
+  stroke: transparent;
+  stroke-width: 20;
+  pointer-events: stroke;
+  cursor: grab;
+}
+.relight-gizmo__ring--yaw path:not(.relight-gizmo__ring-hit) {
+  stroke: rgba(62, 230, 255, 0.62);
+}
+.relight-gizmo__ring--pitch path:not(.relight-gizmo__ring-hit) {
+  stroke: rgba(255, 122, 26, 0.62);
+}
+.relight-gizmo__ring:hover path:not(.relight-gizmo__ring-hit) {
+  stroke-opacity: 1;
+}
+/* Fixed grab points on the rings: a big invisible circle round a small dot. They stay put while
+   the light turns, so they never chase the pointer. */
+.relight-gizmo__handle {
+  cursor: grab;
+}
+.relight-gizmo__handle circle {
+  pointer-events: none;
+}
+.relight-gizmo__handle .relight-gizmo__handle-hit {
+  fill: transparent;
+  pointer-events: all;
+}
+.relight-gizmo__handle--yaw circle:not(.relight-gizmo__handle-hit) {
+  fill: #3ee6ff;
+}
+.relight-gizmo__handle--pitch circle:not(.relight-gizmo__handle-hit) {
+  fill: #ff7a1a;
+}
+/* The live placement readout: x / y / z and the turn in degrees. */
+.relight-scope__readout {
+  position: absolute;
+  left: 76px;
+  bottom: 4px;
+  display: flex;
+  gap: 6px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(4, 10, 13, 0.6);
+  color: #9fc9d3;
+  font-size: 9.5px;
+  line-height: 14px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+/* The undocked lighting space: a floating box over the photo, as the Depth Scope's is. */
+.relightscope {
+  position: absolute;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  min-width: 340px;
+  min-height: 280px;
+  border: 1px solid rgba(var(--neon), 0.55);
+  border-radius: 6px;
+  background: rgba(6, 10, 13, 0.95);
+  box-shadow: 0 0 12px rgba(var(--neon), 0.25);
+  color: #e6e6ea;
+  font-size: 12px;
+  cursor: default;
+  overflow: hidden;
+  pointer-events: auto;
+}
+.relightscope__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-bottom: 1px solid rgba(var(--neon), 0.25);
+  background: linear-gradient(180deg, rgba(var(--neon), 0.12), rgba(var(--neon), 0.02));
+  color: #3ee6ff;
+  cursor: move;
+  touch-action: none;
+}
+.relightscope__title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.relightscope__meta {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  opacity: 0.55;
+  font-size: 10.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.relightscope__tools {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.relightscope__body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.relightscope__grip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  background: linear-gradient(135deg, transparent 45%, rgba(var(--neon), 0.7) 45%, rgba(var(--neon), 0.7) 55%, transparent 55%);
+}
+/* The sun: a yellow ball with rays. */
+.relight-gizmo__sun circle {
+  fill: #ffd23f;
+  stroke: #fff2b0;
+  stroke-width: 1.5;
+}
+.relight-gizmo__sun line {
+  stroke: #ffd23f;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+/* The simple placement pad: four arrows, and Move / Tilt between them. */
+.relight-pad {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid rgba(var(--neon), 0.3);
+  border-radius: 5px;
+  background: rgba(4, 10, 13, 0.78);
+  pointer-events: auto;
+}
+.relight-pad__mode {
+  padding: 1px 4px;
+  border: 1px solid rgba(var(--neon), 0.3);
+  border-radius: 3px;
+  background: #0b0b0b;
+  color: #9fc9d3;
+  font-family: inherit;
+  font-size: 9px;
+  line-height: 12px;
+  cursor: pointer;
+}
+.relight-pad__mode.is-tilt {
+  border-color: rgb(255, 122, 26);
+  color: rgb(255, 122, 26);
+}
+.relight-pad__mode.is-depth {
+  border-color: #5d8aff;
+  color: #5d8aff;
+}
+.relight-pad__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 15px);
+  grid-template-rows: repeat(3, 15px);
+  gap: 1px;
+}
+.relight-pad__grid button {
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: 1px solid rgba(var(--neon), 0.25);
+  border-radius: 3px;
+  background: #0b0b0b;
+  color: #bdf3ff;
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+.relight-pad__grid button:hover {
+  border-color: rgb(255, 122, 26);
+  color: rgb(255, 122, 26);
+}
+.relight-pad__grid button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.relight-pad__grid button:disabled:hover {
+  border-color: rgba(var(--neon), 0.25);
+  color: #bdf3ff;
+}
+.relight-pad__dot {
+  place-self: center;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #3ee6ff;
+  box-shadow: 0 0 5px #3ee6ff;
+}
+.relight-scope__aim {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  /* An indicator, as Blender's direction line is: the rings are what you turn. */
+  pointer-events: none;
+}
+.relight-scope__arrow {
+  position: absolute;
+  inset: -3px;
+  background: var(--light, #fff);
+  clip-path: polygon(4% 32%, 55% 32%, 55% 6%, 98% 50%, 55% 94%, 55% 68%, 4% 68%);
+  transform: rotate(var(--aim-rot, 0deg));
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.95));
+}
+/* The lights as their real rigs (softbox, dish, umbrella...): grab one to move it. */
+.relight-rig {
+  /* A touch see-through: a big softbox in front of the subject mustn't hide the scene. */
+  fill-opacity: 0.8;
+  pointer-events: visiblePainted;
+  cursor: grab;
+  transition: opacity 0.12s;
+}
+.relight-rig:active {
+  cursor: grabbing;
+}
+.relight-rig.is-off {
+  opacity: 0.35;
+}
+.relight-rig.is-hover:not(.is-selected) {
+  filter: brightness(1.25);
+}
+.relight-rig.is-selected {
+  filter: drop-shadow(0 0 1.5px rgba(62, 230, 255, 0.9));
+}
+.relight-gizmo__beam {
+  fill-opacity: 0.09;
+  stroke: none;
+}
+/* The aim ring at the beam's tip: drag it to turn the light. */
+.relight-gizmo__aim {
+  cursor: grab;
+}
+.relight-gizmo__aim-hit {
+  fill: transparent;
+  pointer-events: all;
+}
+.relight-gizmo__aim-line {
+  stroke: var(--light, #fff);
+  stroke-width: 1.2;
+  stroke-dasharray: 4 3;
+  opacity: 0.75;
+  pointer-events: none;
+}
+.relight-gizmo__aim-ring {
+  fill: rgba(4, 10, 13, 0.55);
+  stroke: var(--light, #fff);
+  stroke-width: 2;
+  pointer-events: all;
+}
+.relight-gizmo__aim-arrows {
+  fill: none;
+  stroke: #3ee6ff;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+.relight-gizmo__aim:hover .relight-gizmo__aim-ring,
+.relight-gizmo__aim:hover .relight-gizmo__aim-arrows {
+  stroke: rgb(255, 122, 26);
+}
+.relight-gizmo__aim-dot {
+  fill: var(--light, #fff);
+  pointer-events: none;
+}
+/* The arrow knobs: sideways (red) and nearer / farther (blue) on the floor, height (green) on the
+   pole. Each moves the light along its own axis only. */
+.relight-gizmo__knob {
+  --knob: #5dff8a;
+  cursor: grab;
+}
+.relight-gizmo__knob--side {
+  --knob: #ff6b6b;
+}
+.relight-gizmo__knob--depth {
+  --knob: #6f9bff;
+}
+.relight-gizmo__knob rect {
+  fill: rgba(4, 10, 13, 0.85);
+  stroke: var(--knob);
+  stroke-width: 1.5;
+  pointer-events: all;
+}
+.relight-gizmo__knob path {
+  fill: none;
+  stroke: var(--knob);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+.relight-gizmo__knob:hover rect,
+.relight-gizmo__knob:hover path {
+  stroke: rgb(255, 122, 26);
+}
+/* Each light's number beside its rig. */
+.relight-scope__tag {
+  position: absolute;
+  transform: translate(10px, -22px);
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #bdf3ff;
+  font-size: 10px;
+  line-height: 13px;
+  pointer-events: none;
+}
+.relight-scope__tag.is-selected {
+  background: #3ee6ff;
+  color: #041014;
+}
+.relight-scope__hint {
+  position: absolute;
+  left: 50%;
+  bottom: 3px;
+  transform: translateX(-50%);
+  max-width: calc(100% - 140px);
+  overflow: hidden;
+  color: rgba(159, 201, 211, 0.75);
+  font-size: 9px;
+  line-height: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.relight-scope__note {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 8px;
+  color: #8fb9c4;
+  font-size: 10.5px;
+  text-align: center;
+}
+.relight-scope__pop {
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  z-index: 3;
+}
+
+/* Relight's light handles on the photo (a ring in the light's colour, its number inside). */
+.lighthandles {
+  position: fixed;
+  z-index: 40;
+  pointer-events: none;
+}
+.lighthandle {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  margin: -13px 0 0 -13px;
+  pointer-events: auto;
+  cursor: grab;
+  touch-action: none;
+}
+.lighthandle--drag {
+  cursor: grabbing;
+}
+.lighthandle__ring {
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--light, #fff);
+  border-radius: 50%;
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.75), inset 0 0 4px rgba(0, 0, 0, 0.6);
+  opacity: 0.9;
+}
+.lighthandle__dot {
+  position: absolute;
+  inset: 9px;
+  border-radius: 50%;
+  background: var(--light, #fff);
+  box-shadow: 0 0 6px var(--light, #fff);
+}
+.lighthandle__label {
+  position: absolute;
+  left: 28px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 0 3px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.65);
+  color: var(--light, #fff);
+  font-size: 10px;
+  line-height: 14px;
+  pointer-events: none;
+}
+.lighthandle--on .lighthandle__ring {
+  border-width: 3px;
+  box-shadow: 0 0 10px rgba(62, 230, 255, 0.55), 0 0 6px rgba(0, 0, 0, 0.8);
+  opacity: 1;
+}
+.lighthandle--on {
+  width: 32px;
+  height: 32px;
+  margin: -16px 0 0 -16px;
+}
+.lighthandles__lines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+/* A spot's aim dot and a sun's arrow tip: smaller than a lamp, with their own marks. */
+.lighthandle--aim {
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+}
+.lighthandle--aim.lighthandle--on {
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+}
+.lighthandle__cross {
+  position: absolute;
+  inset: 0;
+  border: 1.5px solid var(--light, #fff);
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.55);
+  box-shadow: 0 0 6px rgba(0, 0, 0, 0.7);
+}
+/* A direction arrow, pointing the way the light throws (turned by the handle's own angle). */
+.lighthandle__arrowhead {
+  position: absolute;
+  inset: -3px;
+  background: var(--light, #fff);
+  clip-path: polygon(4% 32%, 55% 32%, 55% 6%, 98% 50%, 55% 94%, 55% 68%, 4% 68%);
+  transform: rotate(var(--aim-rot, 0deg));
+  transform-origin: 50% 50%;
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.95)) drop-shadow(0 0 5px rgba(0, 0, 0, 0.6));
+}
+.lighthandle--aim {
+  border-radius: 50%;
+}
+.lighthandle__arrow {
+  position: absolute;
+  inset: 4px;
+  background: var(--light, #fff);
+  clip-path: var(--hex);
+  box-shadow: 0 0 6px var(--light, #fff);
+}
+.lighthandle--on .lighthandle__dot {
+  inset: 11px;
+}
+.creative-buttons--flash button {
+  font-size: 9px;
+  padding: 2px 3px;
+}
+.creative-flash__label {
+  align-self: center;
+  margin-right: 2px;
+  color: #6f98a2;
+  font-size: 9.5px;
+}
+.creative-buttons--shapes button {
+  font-size: 9.5px;
+  padding: 2px 4px;
+}
+.creative-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 2px 0;
+}
+/* Relight's lights: a chip per light (a colour dot, its kind and number, on/off, remove). */
+.creative-lights {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  margin: 2px 0 3px;
+}
+.creative-light {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid rgba(var(--neon), 0.28);
+  border-radius: 4px;
+  background: #0b0b0b;
+  overflow: hidden;
+}
+.creative-light.is-on {
+  border-color: #3ee6ff;
+}
+.creative-light.is-off {
+  opacity: 0.55;
+}
+.creative-light button {
+  border: 0;
+  background: transparent;
+  color: #9fc9d3;
+  font-family: inherit;
+  font-size: 10px;
+  padding: 2px 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.creative-light__pick:hover,
+.creative-light__on:hover,
+.creative-light__x:hover {
+  color: rgb(255, 122, 26);
+}
+.creative-light__on {
+  border-left: 1px solid rgba(var(--neon), 0.2) !important;
+  font-size: 9px;
+}
+.creative-light.is-on .creative-light__on {
+  color: #3ee6ff;
+}
+.creative-light__x {
+  border-left: 1px solid rgba(var(--neon), 0.2) !important;
+  padding: 2px 5px !important;
+}
+.creative-focus {
+  overflow: hidden;
+  color: #8fb9c4;
+  font-size: 10px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.creative-shot {
+  align-self: center;
+  margin: 0 2px;
+  color: #6f98a2;
+  font-size: 9.5px;
+  line-height: 12px;
+  text-align: center;
+}
+/* Every Creative panel: its title, then one row — its buttons down the left (as Curves keeps its
+   channels), then its scope or sliders. Nothing above the sliders, so the dock is the RAW
+   panels' height (Chris, 24 Nov). */
+.creative-body {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.creative-side {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: 74px;
+  flex-shrink: 0;
+  padding-top: 3px;
+}
+.creative-side > button,
+.relight-side__row > button,
+.relight-side__types > button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 22px;
+  padding: 0 4px;
+  border: 1px solid rgba(var(--neon), 0.28);
+  border-radius: 4px;
+  background: #101010;
+  color: #b7b8c2;
+  font-family: inherit;
+  font-size: 10px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.creative-side > button:hover:not(:disabled),
+.relight-side__row > button:hover:not(:disabled),
+.relight-side__types > button:hover {
+  border-color: rgb(255, 122, 26);
+  color: rgb(255, 122, 26);
+}
+.creative-side > button.is-on,
+.relight-side__row > button.is-on,
+.relight-side__types > button.is-on {
+  border-color: #3ee6ff;
+  background: rgba(62, 230, 255, 0.14);
+  color: #3ee6ff;
+}
+.creative-side button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+/* Two columns where a panel has more buttons than one column holds (Depth). */
+.creative-side--two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-auto-rows: min-content;
+  align-content: start;
+  width: 96px;
+}
+.creative-side__note {
+  overflow: hidden;
+  color: #8fb9c4;
+  font-size: 9.5px;
+  line-height: 12px;
+  overflow-wrap: anywhere;
+}
+.creative-side--two .creative-side__note {
+  grid-column: 1 / -1;
+}
+.creative-body > .creative-scope {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 200px;
+  margin: 3px 0 2px;
+}
+.creative-scope--empty {
+  display: grid;
+  place-items: center;
+  border: 1px dashed rgba(var(--neon), 0.25);
+  border-radius: 4px;
+}
+/* The docked Depth Scope: its buttons down the left, outside the 3D view's frame. */
+.depthscope--docked {
+  flex-direction: row;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  overflow: visible;
+}
+.depthscope__main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  border: 1px solid rgba(var(--neon), 0.45);
+  border-radius: 4px;
+  background: rgba(6, 10, 13, 0.95);
+  overflow: hidden;
+}
+.depthscope__side {
+  padding-top: 0;
+}
+/* Relight's space: its buttons down the left, the 3D view beside them. */
+.relight-frame {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  gap: 6px;
+}
+.relight-view {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  border: 1px solid rgba(var(--neon), 0.35);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.relight-side {
+  width: 96px;
+  padding-top: 0;
+}
+/* The sun's or moon's light falling on the subject: a dashed line from it. */
+.relight-gizmo__sky {
+  stroke-width: 1.2;
+  stroke-dasharray: 5 4;
+  opacity: 0.7;
+}
+.relight-side__row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.relight-side__row > button {
+  flex: 1;
+  padding: 0;
+  font-size: 12px;
+}
+.relight-side__types {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+}
+.relight-side__types > button {
+  padding: 0;
+  color: #8aa3ab;
+}
+.relight-side__count {
+  flex: 1.2;
+  color: #bdf3ff;
+  font-size: 10px;
+  text-align: center;
+}
+.relight-side__row > .relight-side__remove:hover:not(:disabled) {
+  border-color: #ff5d5d;
+  color: #ff5d5d;
+}
+.relight-side__text {
+  font-size: 10px;
+}
+/* Add a light: the strongest button in the column. */
+.relight-side__row > button.relight-side__add {
+  border-color: #3ee6ff;
+  color: #3ee6ff;
+  background: rgba(62, 230, 255, 0.12);
+}
+.relight-side__row > button.relight-side__add:hover {
+  border-color: rgb(255, 122, 26);
+  color: rgb(255, 122, 26);
+}
+/* The docked scope fills what's left of the panel's height. */
+.creative-scope {
+  position: relative;
+  flex: 1 1 128px;
+  width: 100%;
+  min-height: 128px;
+  margin: 3px 0 4px;
+}
+.creative-scope__note {
+  padding: 8px;
+  color: #8fb9c4;
+  font-size: 10.5px;
+}
+.creative-scope__pop {
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 5px;
+  border: 1px solid rgba(var(--neon), 0.3);
+  border-radius: 4px;
+  background: rgba(8, 12, 15, 0.85);
+  color: #3ee6ff;
+  font-family: inherit;
+  font-size: 9.5px;
+  cursor: pointer;
+}
+.creative-scope__pop:hover {
+  border-color: rgb(255, 122, 26);
+  color: rgb(255, 122, 26);
+}
+.creative-scope__open {
+  align-self: flex-start;
+  margin: 2px 0;
+}
+.depthscope--docked {
+  position: absolute;
+  inset: 0;
+  min-width: 0;
+  min-height: 0;
+  border-radius: 4px;
+  box-shadow: none;
+}
+.depthscope--docked .depthscope__head {
+  padding: 2px 3px;
+}
+.depthscope--docked .depthscope__title {
+  display: none;
+}
+.depthscope--docked .depthscope__meta {
+  font-size: 9.5px;
+}
+.depthscope--docked .depthscope__tools button {
+  padding: 1px 3px;
+  font-size: 9.5px;
+}
+/* One line, so the 3D view has the height (the lens is in Bokeh's own line). */
+.depthscope--docked .depthscope__readout {
+  flex-wrap: nowrap;
+  gap: 8px;
+  padding: 2px 5px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+/* The Creative Depth picture over the photo. */
+.viewer__picture-overlay {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0.62;
+  object-fit: fill;
+}
+
+/* Mist's sun pad: the photo's frame is the middle square, the margin puts the glow off frame. */
+.creative-sunpad {
+  position: relative;
+  width: 100%;
+  height: 56px;
+  border: 1px solid rgba(var(--neon), 0.28);
+  border-radius: 3px;
+  background: #0b0b0b;
+  cursor: crosshair;
+  touch-action: none;
+}
+.creative-sunpad__frame {
+  position: absolute;
+  left: 25%;
+  top: 25%;
+  width: 50%;
+  height: 50%;
+  border: 1px dashed rgba(var(--neon), 0.3);
+  pointer-events: none;
+}
+.creative-sunpad__dot {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  margin: -3.5px 0 0 -3.5px;
+  border-radius: 50%;
+  background: rgb(255, 205, 120);
+  box-shadow: 0 0 6px rgba(255, 180, 90, 0.9);
+  pointer-events: none;
+}
+
+/* Undock and Redock, as the app's other key buttons: Undock filled cyan (as the selected mode),
+   Redock filled neon orange (as Export). Above the side columns' own button styles. */
+button.btn-undock,
+.creative-side > button.btn-undock,
+.depthscope__tools button.btn-undock {
+  border-color: #3ee6ff;
+  background: linear-gradient(180deg, #5ff0ff, #1fb8d0);
+  color: #041014;
+  font-weight: 600;
+}
+button.btn-undock:hover,
+.creative-side > button.btn-undock:hover:not(:disabled),
+.depthscope__tools button.btn-undock:hover {
+  border-color: #3ee6ff;
+  color: #ffffff;
+}
+button.btn-redock,
+.creative-side > button.btn-redock,
+.depthscope__tools button.btn-redock {
+  border-color: rgb(255, 122, 26);
+  background: rgb(255, 122, 26);
+  color: #101010;
+  font-weight: 600;
+}
+button.btn-redock:hover,
+.creative-side > button.btn-redock:hover:not(:disabled),
+.depthscope__tools button.btn-redock:hover {
+  border-color: rgb(255, 122, 26);
+  color: #ffffff;
 }

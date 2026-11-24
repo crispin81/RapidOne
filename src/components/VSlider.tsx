@@ -134,7 +134,7 @@ export default function VSlider({ def, value, neutral, active, showName, onChang
     if (draft === null) return;
     const typed = Number(draft.replace(/[^\d.+-]/g, ""));
     setDraft(null);
-    if (draft.trim() !== "" && Number.isFinite(typed)) onChange(toDisplayPrecision(typed));
+    if (draft.trim() !== "" && Number.isFinite(typed)) onChange(toDisplayPrecision(def.parse ? def.parse(typed) : typed));
   }
 
   const changed = value !== neutral;

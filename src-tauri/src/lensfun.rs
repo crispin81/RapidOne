@@ -740,7 +740,7 @@ mod tests {
     use super::*;
 
     fn shot(make: &str, lens: &str, focal: f32, f: f32) -> LensShot {
-        LensShot { make: make.into(), lens: lens.into(), focal, fnumber: f }
+        LensShot { make: make.into(), lens: lens.into(), focal, fnumber: f, ..Default::default() }
     }
 
     #[test]

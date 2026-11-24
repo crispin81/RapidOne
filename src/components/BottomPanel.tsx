@@ -30,7 +30,7 @@ const LIGHTROOM_NAMES: Record<string, string> = {
   Sharpen: "Detail",
 };
 
-function PanelTitle({ name }: { name: string }) {
+export function PanelTitle({ name }: { name: string }) {
   const lightroom = LIGHTROOM_NAMES[name];
   const key = panelKey(name);
   // Gold, underlined letter = the group's key (its first).
@@ -53,6 +53,13 @@ function groupOf(sliderId: string | null | undefined): string | null {
 }
 
 
+export type PanelMode = "raw" | "creative";
+
+const PANEL_MODES: { id: PanelMode; label: string; title: string }[] = [
+  { id: "raw", label: "RAW", title: "RAW: the photo's own adjustments (what the bottom panel has always shown)" },
+  { id: "creative", label: "Creative", title: "Creative: Depth, Bokeh and Mist, from the photo's own depth" },
+];
+
 interface Props {
   values: Adjustments;
   /** Per-photo neutral values (Temperature/Tint start at the as-shot white balance). */
@@ -62,6 +69,8 @@ interface Props {
   selectedPanel: string | null;
   /** Select a panel by clicking it (null: deselect). */
   onSelectPanel: (name: string | null) => void;
+  /** A Creative panel is selected (lit by CreativePanels), so the others dim. */
+  creativeFocus: boolean;
   showNames: boolean;
   /** The tick boxes at the left of the W/B group: short slider names, and the D65 corridor lines and glow round the photo. */
   onToggleNames: () => void;
@@ -88,6 +97,11 @@ interface Props {
   onPicks: (p: Partial<PanelPicks>) => void;
   /** A mask tool is open: the sliders masks have act on the picked mask (`values` holds its
    *  numbers for them), the others are greyed out; the tick boxes are Show mask and Invert. */
+  /** RAW (today's panels) or Creative (Depth and Bokeh). */
+  mode: PanelMode;
+  onMode: (mode: PanelMode) => void;
+  /** The Creative tab's panels, made by App (kept mounted so switching never flickers). */
+  creativePanels: ReactNode;
   /** The white balance picker is waiting for a click on the photo; the W/B heading's button starts or stops it. */
   wbPicking?: boolean;
   onPickWhiteBalance?: () => void;
@@ -95,6 +109,8 @@ interface Props {
   onGroupMenu?: (name: string, x: number, y: number) => void;
   /** The photo has a subject mask: the People Mask group (its Exposure and Contrast) shows. */
   showSubject?: boolean;
+  /** Edit is in library (grid) view: the Names and D65 Glow tick boxes don't apply there, so they hide. */
+  library?: boolean;
   mask?: {
     /** The slider as the mask uses it, or null (greyed out). */
     defOf: (def: SliderDef) => SliderDef | null;
@@ -117,6 +133,7 @@ export default function BottomPanel({
   activeSliderId,
   selectedPanel,
   onSelectPanel,
+  creativeFocus,
   showNames,
   onToggleNames,
   surround,
@@ -136,7 +153,11 @@ export default function BottomPanel({
   onAutoKeystone,
   picks,
   onPicks,
+  mode,
+  onMode,
+  creativePanels,
   mask,
+  library = false,
   showSubject = false,
   onGroupMenu,
   wbPicking = false,
@@ -198,10 +219,10 @@ export default function BottomPanel({
   return (
     <>
       {/* The tick boxes, in a slim row on the loupe's bottom edge just above the panel, so the panel has its width for sliders.
-          With a mask tool open, hidden (Show mask and each layer's Invert are in the mask layers panel): hidden, not
-          removed, as a fresh element flickers in WebKitGTK's drawing. */}
+          With a mask tool open, hidden (Show mask and each layer's Invert are in the mask layers panel), and in library
+          view, where neither applies (Chris, 15 Nov): hidden, not removed, as a fresh element flickers in WebKitGTK's drawing. */}
       {(
-        <div className="panel__options panel__options--float" style={mask ? { visibility: "hidden" } : undefined} aria-hidden={mask ? true : undefined}>
+        <div className="panel__options panel__options--float" style={mask || library ? { visibility: "hidden" } : undefined} aria-hidden={mask || library ? true : undefined}>
           <label className="check" title="Show short names under the sliders (off: two letters, narrower)">
             <input type="checkbox" checked={showNames} onChange={onToggleNames} aria-label="Names" />
             {<span>Names</span>}
@@ -212,7 +233,29 @@ export default function BottomPanel({
           </label>
         </div>
       )}
-    <div className={`panel${lit ? " panel--focus" : ""}`}>
+    <div className={`panel${(mode === "creative" ? creativeFocus : lit) ? " panel--focus" : ""}`}>
+      {/* RAW | Creative, a narrow column right beside the first panel (reading bottom to top). */}
+      <div className="modeswitch panel-switch" role="tablist" aria-label="RAW or Creative panels">
+        <span className="modeswitch__slider" style={{ transform: `translateY(${mode === "creative" ? 100 : 0}%)` }} aria-hidden="true" />
+        {PANEL_MODES.map((m) => (
+          <button
+            key={m.id}
+            type="button"
+            role="tab"
+            aria-selected={mode === m.id}
+            className={`modeswitch__option${mode === m.id ? " modeswitch__option--on" : ""}`}
+            onClick={(e) => {
+              // As ModeSwitch: a mouse click mustn't leave it focused.
+              if (e.detail > 0) e.currentTarget.blur();
+              onMode(m.id);
+            }}
+            title={m.title}
+          >
+            <span>{m.label}</span>
+          </button>
+        ))}
+      </div>
+      <div className="panel__set" hidden={mode === "creative"}>
       {PANEL_ORDER.map((name) => {
         if (special[name]) {
           return (
@@ -367,6 +410,10 @@ export default function BottomPanel({
           </section>
         );
       })}
+      </div>
+      <div className="panel__set" hidden={mode === "raw"}>
+        {creativePanels}
+      </div>
     </div>
     </>
   );

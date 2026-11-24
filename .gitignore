@@ -18,6 +18,7 @@ src-tauri/binaries/
 src-tauri/retouch-engine/
 src-tauri/linux-lib/
 src-tauri/windows-lib/
+src-tauri/mac-lib/
 release/
 
 # Before/after comparison pictures (local only, never committed).

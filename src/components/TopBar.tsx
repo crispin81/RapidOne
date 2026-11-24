@@ -224,7 +224,7 @@ export default function TopBar({
           className={gradientTool ? "is-on" : undefined}
           onClick={onGradient}
           disabled={!homeEnabled && !gradientTool}
-          title="Masks (M): pick a type (Subject, Brush, Linear, Radial) to start a layer, then + / − to add or take away shapes on it, and set its sliders below (M or Esc: done)"
+          title="Masks (M): pick a type (Subject, Depth, Brush, Linear, Radial) to start a layer, then + / − to add or take away shapes on it, and set its sliders below (M or Esc: done)"
           aria-label="Masks"
         >
           <MasksIcon size={14} /> <span className="topbar__label">Masks</span>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import "./App.css";
 import "./moduleTweaks.css";
@@ -28,6 +28,14 @@ import {
   prepareSubject,
   maskOverlay,
   subjectSnapshot,
+  findDepth,
+  depthAt as depthAtPoint,
+  depthOverlay,
+  bokehFocus,
+  bokehFocusNearest,
+  bokehTint,
+  bokehZone,
+  sceneInfo as sceneInfoOf,
   lensChoose,
   lensAddProfiles,
   lensPrefs,
@@ -91,6 +99,7 @@ import PresetMenu, { type PresetScope } from "./components/PresetMenu";
 import ContextMenu, { type ContextMenuItem } from "./components/ContextMenu";
 import { Check, Loader2, RotateCcw, Star, Trash2 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import AutoStyleMenu, { type AutoStyleScope } from "./components/AutoStyleMenu";
 import DenoiseMenu from "./components/DenoiseMenu";
 import SubjectAllButton from "./components/SubjectAllButton";
@@ -104,6 +113,12 @@ import PatchOverlay from "./components/PatchOverlay";
 // The R1 icon, for Retouch's engine setup screen.
 import rapidOneIcon from "../src-tauri/icons/128x128@2x.png";
 import { DEFAULT_COPY_GROUPS, pasteSnapshot } from "./copySettings";
+import { addLight, creativeHold, lightScope, creativePanelForKey, DEFAULT_BOKEH, DEFAULT_CREATIVE, DEFAULT_MIST, DEFAULT_RELIGHT, focusBand, hasCreative, normalizeCreative, removeLight, withBokeh, withLight, withMist, withRelight, type Bokeh, type Creative, type LightKind, type Mist } from "./creative";
+import CreativePanels from "./components/CreativePanels";
+import type { PanelMode } from "./components/BottomPanel";
+import type { ScopePlanes } from "./components/DepthScope";
+const DepthScope = lazy(() => import("./components/DepthScope"));
+const RelightScope = lazy(() => import("./components/RelightScope"));
 import { roundRotate, tiltToVertical } from "./transform";
 import BottomPanel from "./components/BottomPanel";
 import Filmstrip, { StripFilterBar } from "./components/Filmstrip";
@@ -120,7 +135,7 @@ import { DEFAULT_GRADE, type Grade } from "./grade";
 import { DEFAULT_MIXER, type Mixer } from "./mixer";
 import { computeHistogram, type Histogram } from "./histogram";
 import { isNoCrop, NO_CROP, straightCrop, type Crop } from "./crop";
-import { hasSubject, isMaskSlider, mainSubjectIndex, MASK_SLIDER_IDS, maskSliderDef, newGradient, type Gradient } from "./gradients";
+import { hasDepth, hasSubject, isMaskSlider, mainSubjectIndex, MASK_SLIDER_IDS, maskSliderDef, newGradient, type Gradient } from "./gradients";
 import GradientOverlay from "./components/GradientOverlay";
 import ViewSwitch, { folderFor, viewOf, type FolderViews } from "./components/ViewSwitch";
 import { editFromSnapshot, editHasContent, parseSidecar, sidecarText, snapshotFromEdit, type PhotoLook, type SidecarFile } from "./sidecar";
@@ -184,8 +199,10 @@ interface Stack {
   top: string;
 }
 
-/** `<name>_retouched.tif`, `<name>_retouched-2.tif` ...: the name without the ending, and the version. */
+/** `<name>_retouched.tif`, `<name>_retouched-2.tif` ... (`.jpg` for a JPEG original): the name without the ending, and the version. */
 const RETOUCHED = /^(.*)_retouched(?:-(\d+))?$/i;
+/** What Retouch hands back: a TIFF, or a JPEG for a JPEG original. */
+const HANDED_BACK = /\.(tiff?|jpe?g)$/i;
 const stackKey = (path: string) => path.replace(/\\/g, "/").replace(/\.[^./]+$/, "").toLowerCase();
 
 /** The stacks in a folder, by member path (every member, the original too, maps to its stack). */
@@ -194,11 +211,11 @@ function buildStacks(photos: PhotoInfo[]): Map<string, Stack> {
   const children = new Map<string, { path: string; version: number }[]>();
   for (const p of photos) {
     const key = stackKey(p.path);
-    if (!RETOUCHED.test(key) || !/\.tiff?$/i.test(p.path)) originals.set(key, p);
+    if (!RETOUCHED.test(key) || !HANDED_BACK.test(p.path)) originals.set(key, p);
   }
   for (const p of photos) {
     const m = RETOUCHED.exec(stackKey(p.path));
-    if (!m || !/\.tiff?$/i.test(p.path)) continue;
+    if (!m || !HANDED_BACK.test(p.path)) continue;
     const parent = originals.get(m[1]);
     if (!parent) continue;
     const list = children.get(parent.path) ?? [];
@@ -253,6 +270,8 @@ export default function App() {
   const [removalsByPath, setRemovalsByPath] = useState<Record<string, Spot[]>>({});
   // Linear and radial gradients per photo (local adjustments, gradient.rs).
   const [gradientsByPath, setGradientsByPath] = useState<Record<string, Gradient[]>>({});
+  // The Creative tab's edit per photo (Bokeh now; mist and relight later).
+  const [creativeByPath, setCreativeByPath] = useState<Record<string, Creative>>({});
   // The gradient tool is open (which kind new ones are drawn with), or null.
   // The masks are open (the layers panel on the photo).
   const [gradientTool, setGradientTool] = useState(false);
@@ -263,6 +282,20 @@ export default function App() {
   // A mask's red overlay on the open photo (any kind, combined or not; its subject found once and kept).
   const maskOverlayFor = useCallback(
     (mask: Gradient) => (currentPath ? maskOverlay(currentPath, mask) : Promise.resolve(null)),
+    [currentPath],
+  );
+  // The open photo's depth, for a depth mask's Show depth picture and its Pick calibration.
+  const depthOverlayFor = useCallback(
+    (mask: Gradient) => (currentPath ? depthOverlay(currentPath, mask) : Promise.resolve(null)),
+    [currentPath],
+  );
+  const depthAtFor = useCallback(
+    (x: number, y: number) => (currentPath ? depthAtPoint(currentPath, x, y) : Promise.reject(new Error("no photo"))),
+    [currentPath],
+  );
+  // The open photo's camera and distance facts (metres), for a depth mask's band labels.
+  const sceneInfoFor = useCallback(
+    () => (currentPath ? sceneInfoOf(currentPath) : Promise.resolve(null)),
     [currentPath],
   );
   // The Remove tool is open; a removal is running.
@@ -374,9 +407,47 @@ export default function App() {
   }, []);
   // The panel selected by its letter key (lit up); slider letters then work within it.
   const [selectedPanel, setSelectedPanel] = useState<string | null>(null);
+  // The Creative panel selected: its own, so a RAW panel left selected doesn't dim Creative's.
+  const [creativePanel, setCreativePanel] = useState<string | null>(null);
+  // Its sliders' held letters go to CreativePanels, which knows them; and a fresh scope on Depth's reset.
+  const creativeAdjust = useRef<((id: string, steps: number, coarse: boolean, reset: boolean) => void) | null>(null);
+  const [scopeKey, setScopeKey] = useState(0);
   // What's picked inside the Mixer, Grade, Fine tuning and Curves panels.
   const [picks, setPicks] = useState<PanelPicks>(DEFAULT_PICKS);
   const onPicks = useCallback((p: Partial<PanelPicks>) => setPicks((prev) => ({ ...prev, ...p })), []);
+  // RAW or Creative at the bottom panel's far left: a UI state, remembered this session (not part
+  // of the edit). A mask tool open always shows RAW, since its sliders are the masks'.
+  const [panelMode, setPanelModeState] = useState<PanelMode>(() => {
+    try {
+      return localStorage.getItem("rapidone.panelMode") === "creative" ? "creative" : "raw";
+    } catch {
+      return "raw";
+    }
+  });
+  const changePanelMode = useCallback((m: PanelMode) => {
+    setPanelModeState(m);
+    try {
+      localStorage.setItem("rapidone.panelMode", m);
+    } catch {
+      // Not fatal: the choice is forgotten next launch.
+    }
+  }, []);
+  // The Depth Scope and its focus bands in Creative.
+  const [creativeScopeDocked, setCreativeScopeDocked] = useState(true);
+  // The Relight space's own dock: in the Relight panel, or floating over the photo.
+  const [relightScopeDocked, setRelightScopeDocked] = useState(true);
+  const [creativeShowDepth, setCreativeShowDepth] = useState(false);
+  const [creativeDepthImage, setCreativeDepthImage] = useState<string | null>(null);
+  // The focus-plane tint while a Depth Scope plane is dragged (the focus yellow, the rest
+  // dimmed), cleared shortly after the drag stops.
+  const [creativeTint, setCreativeTint] = useState(false);
+  const [creativeTintImage, setCreativeTintImage] = useState<string | null>(null);
+  const tintTimer = useRef<number | null>(null);
+  const beginTint = useCallback(() => {
+    setCreativeTint(true);
+    if (tintTimer.current !== null) window.clearTimeout(tintTimer.current);
+    tintTimer.current = window.setTimeout(() => setCreativeTint(false), 500);
+  }, []);
   // The start screen's picture: the last photo worked on, from its folder's
   // cache; undefined (the Isle of Skye default) if there's none or it's gone.
   const [startImage, setStartImage] = useState<string | undefined>();
@@ -511,7 +582,10 @@ export default function App() {
     }
     return { stars, picked };
   }, [allPhotos]);
-  const currentPhoto = currentIndex >= 0 ? photos[currentIndex] : null;
+  // The photo being edited stays open even when the filter hides it (a filter that matches nothing,
+  // or for the moment before the effect above moves to the first one shown). Before this, a hidden
+  // photo counted as "no photo", which sent Edit (and Retouch) back to the home screen.
+  const currentPhoto = currentIndex >= 0 ? photos[currentIndex] : ((currentPath && (allPhotos.find((p) => p.path === currentPath) ?? photosByPath[currentPath])) || null);
   // Photos picked for export (Ctrl-click toggles, Shift-click takes a range) in
   // the filmstrip or the library; empty means just the open photo.
   const [selection, setSelection] = useState<ReadonlySet<string>>(new Set());
@@ -529,6 +603,9 @@ export default function App() {
   // (In Cull, a folder being opened has no photo picked in Edit yet: Cull stays on screen meanwhile.)
   const atHome = home || (!currentPhoto && chosenMode !== "cull");
   const mode: Mode = atHome ? "edit" : chosenMode;
+  // The Creative panels are on screen: only then do they (and the Depth Scope) ask for the photo's
+  // depth, so a photo opened in RAW doesn't run MoGe-2 for them.
+  const creativeShown = panelMode === "creative" && mode === "edit" && panelVisible && !libraryView && !gradientTool;
   // For callbacks that need the current tab without re-creating themselves.
   const modeRef = useRef(mode);
   modeRef.current = mode;
@@ -552,6 +629,89 @@ export default function App() {
   const crop = (currentPath && cropByPath[currentPath]) || NO_CROP;
   const removals = (currentPath && removalsByPath[currentPath]) || NO_REMOVALS;
   const gradients = (currentPath && gradientsByPath[currentPath]) || NO_GRADIENTS;
+  const creative = useMemo(
+    () => normalizeCreative(currentPath ? creativeByPath[currentPath] : undefined),
+    [currentPath, creativeByPath],
+  );
+  // Where the Bokeh focus sits (control depth and metres), for the Depth Scope and the panel's
+  // focus line. The subject's median when Auto is on, else the picked point (computed by the engine).
+  const [creativeFocus, setCreativeFocus] = useState<{ control: number; metres: number | null } | null>(null);
+  useEffect(() => {
+    if (!currentPath || !creativeShown) {
+      setCreativeFocus(null);
+      return;
+    }
+    let alive = true;
+    const path = currentPath;
+    const timer = window.setTimeout(() => {
+      bokehFocus(path, engineSettingsRef.current, creative.bokeh.focusU, creative.bokeh.focusV, creative.bokeh.focusAuto)
+        .then((f) => {
+          if (!alive) return;
+          setCreativeFocus({ control: f.control, metres: f.sky > 0.5 || !Number.isFinite(f.metres) ? null : f.metres });
+        })
+        .catch(() => alive && setCreativeFocus(null));
+    }, 350);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [currentPath, creativeShown, creative]);
+  // The f-number's own sharp zone round that focus (the lens's depth of field), which Focus range widens.
+  const [creativeZone, setCreativeZone] = useState<{ near: number; far: number } | null>(null);
+  const { mode: bokehMode, aperture: bokehAperture, focal: bokehFocal } = creative.bokeh;
+  useEffect(() => {
+    if (!currentPath || !creativeFocus) {
+      setCreativeZone(null);
+      return;
+    }
+    let alive = true;
+    bokehZone(currentPath, { ...DEFAULT_CREATIVE.bokeh, mode: bokehMode, aperture: bokehAperture, focal: bokehFocal }, creativeFocus.control)
+      .then((z) => alive && setCreativeZone(z))
+      .catch(() => alive && setCreativeZone(null));
+    return () => {
+      alive = false;
+    };
+  }, [currentPath, creativeFocus, bokehMode, bokehAperture, bokehFocal]);
+  const creativeBand = useMemo(
+    () => focusBand(creativeFocus?.control ?? 0.5, creativeZone, creative.bokeh.focusRange),
+    [creativeFocus, creativeZone, creative.bokeh.focusRange],
+  );
+  // The Depth picture over the photo in Creative ("Show depth"): warm near, cool far, with the
+  // Bokeh focus band yellow. Made when the toggle is on and the focus or range moves.
+  useEffect(() => {
+    if (!creativeShowDepth || !creativeShown || !currentPath) {
+      setCreativeDepthImage(null);
+      return;
+    }
+    let alive = true;
+    const path = currentPath;
+    const timer = window.setTimeout(() => {
+      const focus = creativeFocus ? creativeFocus.control : null;
+      const mask = focus === null ? null : { ...newGradient("depth", { x: 0.5, y: 0.5 }, { x: 0.5, y: 0.5 }), ...creativeBand, fade: 0.02 };
+      depthOverlay(path, mask)
+        .then((img) => alive && setCreativeDepthImage(img))
+        .catch(() => alive && setCreativeDepthImage(null));
+    }, 220);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [creativeShowDepth, creativeShown, currentPath, creative, creativeFocus, creativeBand]);
+  // The tint while dragging the scope's planes: the focus yellow, the rest dimmed.
+  useEffect(() => {
+    if (!creativeTint || !creativeShown || !currentPath || !creativeFocus) {
+      setCreativeTintImage(null);
+      return;
+    }
+    let alive = true;
+    const path = currentPath;
+    bokehTint(path, creativeBand.near, creativeBand.far)
+      .then((img) => alive && setCreativeTintImage(img))
+      .catch(() => alive && setCreativeTintImage(null));
+    return () => {
+      alive = false;
+    };
+  }, [creativeTint, creativeShown, currentPath, creativeBand, creativeFocus]);
   // The photo on screen whose subject is being found (an AI model, 3-4 s of every core), for the
   // "Finding subject" note over the viewer (Chris, 12 Nov). Shown only past 300 ms, so a subject
   // already found (kept with the photo or in the folder's cache) doesn't flash it.
@@ -579,9 +739,42 @@ export default function App() {
     };
   }, [currentPath, usesSubjectNow]);
 
+  // The same for a depth mask: its depth map, found once and kept in the folder's cache (a second
+  // or so on a graphics card, more on the CPU), with "Finding depth" over the viewer meanwhile.
+  const [findingDepth, setFindingDepth] = useState<string | null>(null);
+  // Each photo's depth found (a count): part of the render key, so the picture rendered without it
+  // is replaced once it's there.
+  const [depthFound, setDepthFound] = useState<Record<string, number>>({});
+  const usesDepthNow = Boolean(currentPath) && (gradients.some(hasDepth) || creative.bokeh.enabled || creative.mist.enabled || creative.relight.enabled);
+  useEffect(() => {
+    if (!usesDepthNow || !currentPath) return;
+    const path = currentPath;
+    let done = false;
+    const timer = window.setTimeout(() => {
+      if (!done) setFindingDepth(path);
+    }, 300);
+    void findDepth(path)
+      .catch(() => false)
+      .then((found) => {
+        // On-screen renders never wait for (or run) the depth model: they go without it until
+        // it's found, then this renders the photo again with it.
+        if (found && !done) setDepthFound((f) => ({ ...f, [path]: (f[path] ?? 0) + 1 }));
+      })
+      .finally(() => {
+        done = true;
+        window.clearTimeout(timer);
+        setFindingDepth((p) => (p === path ? null : p));
+      });
+    return () => {
+      done = true;
+      window.clearTimeout(timer);
+      setFindingDepth(null);
+    };
+  }, [currentPath, usesDepthNow]);
+
   // Undo / redo (history.ts): per photo, snapshots of the whole edit.
-  const editState = useRef({ edits, curvesByPath, gradeByPath, mixerByPath, profileByPath, cropByPath, removalsByPath, gradientsByPath });
-  editState.current = { edits, curvesByPath, gradeByPath, mixerByPath, profileByPath, cropByPath, removalsByPath, gradientsByPath };
+  const editState = useRef({ edits, curvesByPath, gradeByPath, mixerByPath, profileByPath, cropByPath, removalsByPath, gradientsByPath, creativeByPath });
+  editState.current = { edits, curvesByPath, gradeByPath, mixerByPath, profileByPath, cropByPath, removalsByPath, gradientsByPath, creativeByPath };
   const histories = useRef<Record<string, History>>({});
   const snapshotOf = useCallback((path: string): Snapshot => {
     const s = editState.current;
@@ -594,6 +787,7 @@ export default function App() {
       crop: s.cropByPath[path],
       removals: s.removalsByPath[path],
       gradients: s.gradientsByPath[path],
+      creative: s.creativeByPath[path],
     };
   }, []);
   /** Call before changing a photo's edit; `key` names the control (null: always a new step). */
@@ -618,6 +812,7 @@ export default function App() {
     setCropByPath((prev) => withEntry(prev, path, snap.crop));
     setRemovalsByPath((prev) => withEntry(prev, path, snap.removals));
     setGradientsByPath((prev) => withEntry(prev, path, snap.gradients));
+    setCreativeByPath((prev) => withEntry(prev, path, snap.creative));
     // Readable straight away, in case of another undo before the re-render.
     const s = editState.current;
     editState.current = {
@@ -629,6 +824,7 @@ export default function App() {
       cropByPath: withEntry(s.cropByPath, path, snap.crop),
       removalsByPath: withEntry(s.removalsByPath, path, snap.removals),
       gradientsByPath: withEntry(s.gradientsByPath, path, snap.gradients),
+      creativeByPath: withEntry(s.creativeByPath, path, snap.creative),
     };
   }, []);
   const stepHistory = useCallback(
@@ -668,7 +864,7 @@ export default function App() {
   // at a time: its subject found (if a subject mask was pasted) and its thumbnail
   // rendered with the new edit, so the filmstrip and library show it. A later paste
   // adds to the queue; the progress bar says how far it's got.
-  const [pasteProgress, setPasteProgress] = useState<{ done: number; total: number; subjects: boolean } | null>(null);
+  const [pasteProgress, setPasteProgress] = useState<{ done: number; total: number; subjects: boolean; depths: boolean } | null>(null);
   // The computer's core count (how many photos a style works out at once).
   const cores = useRef(navigator.hardwareConcurrency || 4);
   useEffect(() => {
@@ -676,11 +872,12 @@ export default function App() {
       .then((n) => (cores.current = n))
       .catch(() => undefined);
   }, []);
-  const pasteQueue = useRef<{ jobs: { path: string; subject: boolean }[]; done: number; total: number; subjects: boolean; running: number }>({
+  const pasteQueue = useRef<{ jobs: { path: string; subject: boolean; depth: boolean }[]; done: number; total: number; subjects: boolean; depths: boolean; running: number }>({
     jobs: [],
     done: 0,
     total: 0,
     subjects: false,
+    depths: false,
     running: 0,
   });
   // A photo's settings as the viewer renders them (and keys its pictures by), given its
@@ -700,6 +897,7 @@ export default function App() {
         s.crop ?? NO_CROP,
         s.removals ?? NO_REMOVALS,
         s.gradients ?? NO_GRADIENTS,
+        s.creative ?? DEFAULT_CREATIVE,
       );
     },
     [snapshotOf],
@@ -841,29 +1039,32 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   prepareFullRef.current = prepareFull;
-  const refreshPasted = useCallback((paths: string[], subject: boolean) => {
+  const refreshPasted = useCallback((paths: string[], subject: boolean, depth: boolean) => {
     const q = pasteQueue.current;
     // A photo already waiting is done once, with whatever it has by then.
     const fresh = paths.filter((p) => !q.jobs.some((j) => j.path === p));
     q.total += fresh.length;
     if (fresh.length === 0) return;
-    q.jobs.push(...fresh.map((path) => ({ path, subject })));
+    q.jobs.push(...fresh.map((path) => ({ path, subject, depth })));
     q.subjects ||= subject;
-    setPasteProgress({ done: q.done, total: q.total, subjects: q.subjects });
+    q.depths ||= depth;
+    setPasteProgress({ done: q.done, total: q.total, subjects: q.subjects, depths: q.depths });
     const work = async () => {
       while (q.jobs.length) {
         const job = q.jobs.shift()!;
         if (job.subject) await findSubject(job.path).catch(() => false);
+        if (job.depth) await findDepth(job.path).catch(() => false);
         // Its thumbnail and full picture, from one render.
         await renderFull(job.path);
         q.done++;
-        setPasteProgress({ done: q.done, total: q.total, subjects: q.subjects });
+        setPasteProgress({ done: q.done, total: q.total, subjects: q.subjects, depths: q.depths });
       }
       q.running--;
       if (q.running > 0) return;
       q.done = 0;
       q.total = 0;
       q.subjects = false;
+      q.depths = false;
       setPasteProgress(null);
     };
     // One at a time: each render already uses every core (two at once only slowed both).
@@ -951,10 +1152,12 @@ export default function App() {
         // copied from is done first too, so it looks the same as the others in the filmstrip and library.
         if (paths.length > 1 || (paths.length === 1 && paths[0] !== currentPath)) {
           const source = photos.some((p) => p.path === copied.from) ? [copied.from] : [];
-          // Finding the subject is only needed for a Subject layer that adapts (none frozen in it).
+          // Finding the subject is only needed for a Subject layer that adapts (none frozen in it);
+          // the depth map for a depth layer (each photo's own).
           const live = (g: Gradient) => g.kind === "subject" && !g.frozen;
           const adapts = Boolean(copied.snap.gradients?.some((g) => live(g) || g.parts?.some((p) => live(p.shape))));
-          refreshPasted([...source, ...paths], copied.groups.includes("gradients") && adapts);
+          const depth = Boolean(copied.snap.gradients?.some(hasDepth));
+          refreshPasted([...source, ...paths], copied.groups.includes("gradients") && adapts, copied.groups.includes("gradients") && depth);
         }
         if (paths.length > 1 || scope === "all") setNotice(`Pasted ${baseName(copied.from)}'s settings to ${paths.length} photo${paths.length === 1 ? "" : "s"}.`);
       })();
@@ -1244,7 +1447,7 @@ export default function App() {
             const path = p.path;
             const edited =
               Object.keys(s.edits[path] ?? {}).length > 0 ||
-              Boolean(s.curvesByPath[path] || s.gradeByPath[path] || s.mixerByPath[path] || s.profileByPath[path] || s.removalsByPath[path]?.length || s.gradientsByPath[path]?.length);
+              Boolean(s.curvesByPath[path] || s.gradeByPath[path] || s.mixerByPath[path] || s.profileByPath[path] || s.removalsByPath[path]?.length || s.gradientsByPath[path]?.length || hasCreative(s.creativeByPath[path]));
             setPreview({ ...p, source: "engine", pending: edited });
             const shot = { temperature: p.asShotTemperature, tint: p.asShotTint };
             if (shot.temperature != null && shot.tint != null) {
@@ -1286,10 +1489,11 @@ export default function App() {
     (removing || gradientTool || patchTool) && !straightCrop(crop) ? NO_CROP : cropping ? { ...NO_CROP, quarter: crop.quarter } : crop,
     removals,
     gradients,
+    creative,
   );
   // Remove, Patch and gradients are placed on the photo as it is, so no keystone while they're open.
   const engineSettings = removing || gradientTool || patchTool ? { ...engineSettingsRaw, keystone: { vertical: 0, horizontal: 0, rotate: 0, scale: 100 } } : engineSettingsRaw;
-  const engineKey = JSON.stringify(engineSettings);
+  const engineKey = JSON.stringify(engineSettings) + (usesDepthNow && currentPath ? `|depth${depthFound[currentPath] ?? 0}` : "");
   const engineSettingsRef = useRef(engineSettings);
   engineSettingsRef.current = engineSettings;
   engineKeyRef.current = engineKey;
@@ -1425,6 +1629,10 @@ export default function App() {
         setError(`Remove failed: ${e}`);
       } finally {
         setRemoveBusy(false);
+        // GPU (Smarter) may now be on the graphics card: the Remove bar's "GPU OFF".
+        void removalModes()
+          .then(setRemoveModes)
+          .catch(() => undefined);
       }
     },
     [record],
@@ -1490,6 +1698,18 @@ export default function App() {
     [currentPath],
   );
   // Remove's "Undo all": its removals only (the patches stay).
+  // One removal undone from its pin on the photo (the others stay).
+  const undoRemoval = useCallback(
+    (file: string) => {
+      if (!currentPath) return;
+      record(currentPath, null);
+      setRemovalsByPath((prev) => {
+        const left = (prev[currentPath] ?? []).filter((x) => isPatch(x) || x.file !== file);
+        return withEntry(prev, currentPath, left.length ? left : undefined);
+      });
+    },
+    [currentPath, record],
+  );
   const clearRemovals = useCallback(() => {
     if (!currentPath) return;
     record(currentPath, null);
@@ -1558,7 +1778,7 @@ export default function App() {
     detailActive.current = active;
   }, []);
   // `exactAfter`: a quick render first, then the exact one (a one-off change on a photo already shown).
-  const renderState = useRef<{ busy: boolean; wanted: { path: string; settings: RenderSettings; interactive: boolean; exactAfter?: boolean } | null }>({
+  const renderState = useRef<{ busy: boolean; wanted: { path: string; settings: RenderSettings; key: string; interactive: boolean; exactAfter?: boolean } | null }>({
     busy: false,
     wanted: null,
   });
@@ -1592,6 +1812,8 @@ export default function App() {
     state.wanted = {
       path: currentPath,
       settings: engineSettings,
+      // The render key (the edit, plus whether its depth was found yet).
+      key: engineKey,
       interactive: interacting || oneOff,
       exactAfter: oneOff,
     };
@@ -1608,13 +1830,16 @@ export default function App() {
           continue;
         }
         try {
-          const key = JSON.stringify(job.settings);
+          const key = job.key;
+          // The folder's cache keys a picture by its edit alone (the engine doesn't keep one made
+          // without its depth).
+          const diskKey = JSON.stringify(job.settings);
           // While dragging: a smaller render (soft while it moves, sharp the
           // moment it stops: Chris's choice), at the size the drag settles on
           // (100/80/60/40/20%: dropping a level when frames are too slow; DragScale).
           const shownLong = Math.round(2400 * fitDragScale.current.scale);
           const started = performance.now();
-          const p = await renderPreview(job.path, job.settings, job.interactive ? undefined : key, job.interactive, shownLong);
+          const p = await renderPreview(job.path, job.settings, job.interactive ? undefined : diskKey, job.interactive, shownLong);
           if (job.interactive) fitDragScale.current.frame(performance.now() - started);
           else fitDragScale.current.end();
           // Superseded while it rendered: the edit changed to one whose picture is already made (the
@@ -1716,6 +1941,7 @@ export default function App() {
     setCropByPath({});
     setRemovalsByPath({});
     setGradientsByPath({});
+    setCreativeByPath({});
     setCropping(false);
     setRemoving(false);
     setGradientTool(false);
@@ -2020,6 +2246,103 @@ export default function App() {
     [currentPath, record],
   );
 
+  /** A Creative panel change (Bokeh now); `key` merges a drag into one undo step. */
+  const setBokeh = useCallback(
+    (patch: Partial<Bokeh>, key: string | null = null) => {
+      if (!currentPath) return;
+      const path = currentPath;
+      record(path, key);
+      setCreativeByPath((prev) => withEntry(prev, path, withBokeh(prev[path], patch)));
+    },
+    [currentPath, record],
+  );
+  /** The selected Relight light: its sliders show and Place moves it. */
+  const [selectedLight, setSelectedLight] = useState<number | null>(null);
+  // Each photo starts with nothing selected in Relight: a light picked on the last photo must not
+  // carry over (its number may name another light here, or none).
+  useEffect(() => {
+    setSelectedLight(null);
+  }, [currentPath]);
+  /** A Relight change (its ambient, relief), `key` merging a drag into one undo step. */
+  const setRelight = useCallback(
+    (patch: Partial<Creative["relight"]>, key: string | null = null) => {
+      if (!currentPath) return;
+      const path = currentPath;
+      record(path, key);
+      setCreativeByPath((prev) => withEntry(prev, path, withRelight(prev[path], patch)));
+    },
+    [currentPath, record],
+  );
+  /** One light changed. */
+  const setLight = useCallback(
+    (id: number, patch: Partial<Creative["relight"]["lights"][number]>, key: string | null = null) => {
+      if (!currentPath) return;
+      const path = currentPath;
+      record(path, key);
+      setCreativeByPath((prev) => withEntry(prev, path, withLight(prev[path], id, patch)));
+    },
+    [currentPath, record],
+  );
+  /** A light added of `kind`, which then becomes the selected one. */
+  const addLightTo = useCallback(
+    (kind: LightKind, typeId?: string, place?: Partial<Creative["relight"]["lights"][number]>) => {
+      if (!currentPath) return;
+      const path = currentPath;
+      record(path, null);
+      setCreativeByPath((prev) => {
+        const next = addLight(prev[path], kind, typeId, place);
+        setSelectedLight(next.relight.lights[next.relight.lights.length - 1]?.id ?? null);
+        return withEntry(prev, path, next);
+      });
+    },
+    [currentPath, record],
+  );
+  /** A light removed. */
+  const removeLightFrom = useCallback(
+    (id: number) => {
+      if (!currentPath) return;
+      const path = currentPath;
+      record(path, null);
+      setCreativeByPath((prev) => withEntry(prev, path, removeLight(prev[path], id)));
+      setSelectedLight((cur) => (cur === id ? null : cur));
+    },
+    [currentPath, record],
+  );
+
+  /** A Mist change; `key` merges a drag into one undo step. */
+  const setMist = useCallback(
+    (patch: Partial<Mist>, key: string | null = null) => {
+      if (!currentPath) return;
+      const path = currentPath;
+      record(path, key);
+      setCreativeByPath((prev) => withEntry(prev, path, withMist(prev[path], patch)));
+    },
+    [currentPath, record],
+  );
+  /** The Depth Scope's focus plane dragged: the nearest real pixel at that depth becomes the focus. */
+  const pickFocusAtDepth = useCallback(
+    (control: number) => {
+      if (!currentPath) return;
+      beginTint();
+      bokehFocusNearest(currentPath, control)
+        .then((f) => setBokeh({ focusU: f.u, focusV: f.v, focusAuto: false }, "creative:focus"))
+        .catch(() => undefined);
+    },
+    [currentPath, setBokeh, beginTint],
+  );
+  /** The Depth Scope's range planes dragged: the gap beyond the f-number's own zone sets Focus range. */
+  const setCreativePlanes = useCallback(
+    (p: ScopePlanes, key: string | null) => {
+      beginTint();
+      const centre = p.focus ?? (p.near + p.far) / 2;
+      const nearGap = p.near - (creativeZone?.near ?? centre);
+      const farGap = (creativeZone?.far ?? centre) - p.far;
+      const range = (key === "scope:near" ? nearGap : key === "scope:far" ? farGap : Math.max(nearGap, farGap)) * 2;
+      setBokeh({ focusRange: Math.min(100, Math.max(0, range * 100)) }, key);
+    },
+    [setBokeh, beginTint, creativeZone],
+  );
+
   const setCrop = useCallback(
     (next: Crop) => {
       if (!currentPath) return;
@@ -2103,6 +2426,38 @@ export default function App() {
       if (!path) return;
       setPicker(null);
       try {
+        if (kind === "light") {
+          const f = await bokehFocus(path, engineSettingsRef.current, x, y);
+          record(path, null);
+          const current = normalizeCreative(creativeByPath[path]);
+          const light = current.relight.lights.find((l) => l.id === selectedLight);
+          if (!light) {
+            setPickNote("Add a light first, then Place it");
+            return;
+          }
+          setCreativeByPath((prev) => withEntry(prev, path, withLight(prev[path], light.id, { u: f.u, v: f.v })));
+          setPickNote(`Light ${light.id} placed${f.sky > 0.5 || !Number.isFinite(f.metres) ? "" : ` at ${f.metres < 10 ? f.metres.toFixed(1) : Math.round(f.metres)} m`}`);
+          return;
+        }
+        if (kind === "mistStart" || kind === "sun") {
+          const f = await bokehFocus(path, engineSettingsRef.current, x, y);
+          record(path, null);
+          if (kind === "mistStart") {
+            setMist({ start: Math.max(normalizeCreative(creativeByPath[path]).mist.far, Math.round(f.control * 100)) }, null);
+            setPickNote(`Fog comes as near as ${f.sky > 0.5 || !Number.isFinite(f.metres) ? "the sky" : `${f.metres < 10 ? f.metres.toFixed(1) : Math.round(f.metres)} m`}`);
+          } else {
+            setMist({ glowU: f.u, glowV: f.v, glow: Math.max(25, creativeByPath[path]?.mist?.glow ?? 0) }, null);
+            setPickNote("Sun placed for the fog's glow");
+          }
+          return;
+        }
+        if (kind === "focus") {
+          const f = await bokehFocus(path, engineSettingsRef.current, x, y);
+          record(path, null);
+          setCreativeByPath((prev) => ({ ...prev, [path]: withBokeh(prev[path], { focusU: f.u, focusV: f.v, focusAuto: false }) }));
+          setPickNote(f.sky > 0.5 || !Number.isFinite(f.metres) ? "Focus picked (sky: it has no distance)" : `Focus picked: ${f.metres < 10 ? f.metres.toFixed(1) : Math.round(f.metres)} m`);
+          return;
+        }
         const p = await pickColour(path, engineSettingsRef.current, x, y);
         if (kind === "wb") {
           if (p.temperature == null || p.tint == null) {
@@ -2130,7 +2485,7 @@ export default function App() {
         setPickNote(`Couldn't read the colour there: ${e}`);
       }
     },
-    [currentPath, record],
+    [currentPath, record, setMist, creativeByPath, selectedLight],
   );
   // A lens chosen for every photo with this EXIF lens name: remembered by the engine; the
   // photos with that name (read from their metadata) are redone.
@@ -2682,7 +3037,7 @@ export default function App() {
     return out;
     // The edits' own maps: snapshotOf reads them through a ref.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [photos, edits, curvesByPath, gradeByPath, mixerByPath, profileByPath, cropByPath, removalsByPath, gradientsByPath]);
+  }, [photos, edits, curvesByPath, gradeByPath, mixerByPath, profileByPath, cropByPath, removalsByPath, gradientsByPath, creativeByPath]);
 
   // Saves each photo's edit to its .rpd shortly after it changes (and once
   // straight after a Lightroom edit is read). Only photos with an edit, or
@@ -2702,6 +3057,7 @@ export default function App() {
         ...Object.keys(cropByPath),
         ...Object.keys(removalsByPath),
         ...Object.keys(gradientsByPath),
+        ...Object.keys(creativeByPath),
         ...sidecarWritten.current.keys(),
       ]);
       for (const path of paths) {
@@ -2728,7 +3084,7 @@ export default function App() {
         sidecarSave.current();
       }, 400);
     }
-  }, [edits, curvesByPath, gradeByPath, mixerByPath, profileByPath, cropByPath, removalsByPath, gradientsByPath, photosByPath, snapshotOf, sidecarTick, looks]);
+  }, [edits, curvesByPath, gradeByPath, mixerByPath, profileByPath, cropByPath, removalsByPath, gradientsByPath, creativeByPath, photosByPath, snapshotOf, sidecarTick, looks]);
 
   const toggleNames = useCallback(() => {
     setShowNames((prev) => {
@@ -2791,6 +3147,7 @@ export default function App() {
       setCropByPath(drop);
       setRemovalsByPath(drop);
       setGradientsByPath(drop);
+      setCreativeByPath(drop);
       setSelection((prev) => new Set([...prev].filter((p) => !gone.has(p))));
     },
     [currentPath, photos],
@@ -2997,6 +3354,13 @@ export default function App() {
     (name: string) => {
       if (!currentPath) return;
       const path = currentPath;
+      // Depth has nothing in the edit: its picture off, and the scope as it starts.
+      if (name === "Depth") {
+        setCreativeShowDepth(false);
+        setCreativeScopeDocked(true);
+        setScopeKey((k) => k + 1);
+        return;
+      }
       const ids = (group: string) => SLIDER_GROUPS.find((g) => g.name === group)?.sliders.map((d) => d.id) ?? [];
       const sliders =
         name === "Curves"
@@ -3018,6 +3382,9 @@ export default function App() {
       if (name === "Curves") setCurvesByPath((prev) => withEntry(prev, path, undefined));
       if (name === "Mixer") setMixerByPath((prev) => withEntry(prev, path, undefined));
       if (name === "Grade") setGradeByPath((prev) => withEntry(prev, path, undefined));
+      if (name === "Bokeh") setCreativeByPath((prev) => withEntry(prev, path, withBokeh(prev[path], DEFAULT_BOKEH)));
+      if (name === "Mist") setCreativeByPath((prev) => withEntry(prev, path, withMist(prev[path], DEFAULT_MIST)));
+      if (name === "Relight") setCreativeByPath((prev) => withEntry(prev, path, withRelight(prev[path], DEFAULT_RELIGHT)));
     },
     [currentPath, record],
   );
@@ -3050,6 +3417,10 @@ export default function App() {
   const adjustHeld = useCallback(
     (target: string, steps: number, coarse: boolean, reset = false) => {
       if (!currentPath) return;
+      if (target.startsWith("creative:")) {
+        creativeAdjust.current?.(target, steps, coarse, reset);
+        return;
+      }
       const path = currentPath;
       const step = coarse ? 5 : 1;
       const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -3090,8 +3461,8 @@ export default function App() {
   // Latest state for the keyboard handlers, which are registered once.
   // Export's dialog is open, in front: the shortcuts are off (set once `exporter` is made, below).
   const exportOpenRef = useRef(false);
-  const live = useRef({ photos, currentIndex, currentPhoto, values: panelValues, neutrals: panelNeutrals, held, setSlider, updateFlags, stepHistory, home, selectedPanel, picks, adjustHeld, cropping, mode, copySettings, pasteSettings, removeByWords, defOf, maskMode, toggleRemoving, hasSubjectMask: subjectIndex >= 0 });
-  live.current = { photos, currentIndex, currentPhoto, values: panelValues, neutrals: panelNeutrals, held, setSlider, updateFlags, stepHistory, home, selectedPanel, picks, adjustHeld, cropping, mode, copySettings, pasteSettings, removeByWords, defOf, maskMode, toggleRemoving, hasSubjectMask: subjectIndex >= 0 };
+  const live = useRef({ photos, currentIndex, currentPhoto, values: panelValues, neutrals: panelNeutrals, held, setSlider, updateFlags, stepHistory, home, selectedPanel, picks, adjustHeld, cropping, mode, copySettings, pasteSettings, removeByWords, defOf, maskMode, toggleRemoving, hasSubjectMask: subjectIndex >= 0, creativeShown, creativePanel, bokeh: creative.bokeh, relight: creative.relight, selectedLight });
+  live.current = { photos, currentIndex, currentPhoto, values: panelValues, neutrals: panelNeutrals, held, setSlider, updateFlags, stepHistory, home, selectedPanel, picks, adjustHeld, cropping, mode, copySettings, pasteSettings, removeByWords, defOf, maskMode, toggleRemoving, hasSubjectMask: subjectIndex >= 0, creativeShown, creativePanel, bokeh: creative.bokeh, relight: creative.relight, selectedLight };
 
   useEffect(() => {
     function goTo(delta: number) {
@@ -3110,7 +3481,7 @@ export default function App() {
     // A tap: pick something in the selected panel with this letter (its
     // band, range or channel). Panels themselves change only with Shift.
     function tapped(code: string) {
-      const selected = live.current.selectedPanel;
+      const selected = live.current.creativeShown ? null : live.current.selectedPanel;
       const pick = selected ? tapPick(selected, code) : undefined;
       if (pick) setPicks((prev) => ({ ...prev, ...pick }));
     }
@@ -3183,14 +3554,16 @@ export default function App() {
       // Plain letters only work inside the selected panel: tap to pick
       // something there (a band, range, channel), hold to adjust.
       if (e.code.startsWith("Key") && !e.ctrlKey && !e.metaKey && !e.altKey && !live.current.home) {
-        const selected = live.current.selectedPanel;
+        // Creative showing: its own panels and sliders.
+        const creativeOn = live.current.creativeShown;
+        const selected = creativeOn ? live.current.creativePanel : live.current.selectedPanel;
         if (e.shiftKey) {
-          const panel = panelForKey(e.code);
+          const panel = creativeOn ? creativePanelForKey(e.code) : panelForKey(e.code);
           // People Mask only shows with a subject mask on the photo.
           if (panel === "People Mask" && !live.current.hasSubjectMask) return;
           if (panel) {
             e.preventDefault();
-            setSelectedPanel(panel === selected ? null : panel);
+            (creativeOn ? setCreativePanel : setSelectedPanel)(panel === selected ? null : panel);
           } else if (e.code === "KeyR" && live.current.currentPhoto) {
             // Shift + R: Crop on and off from anywhere, also in a panel that uses R itself (no panel's
             // letter is R).
@@ -3202,7 +3575,7 @@ export default function App() {
           return;
         }
         if (selected) {
-          const held0 = holdTarget(selected, e.code, live.current.picks);
+          const held0 = creativeOn ? creativeHold(selected, e.code, live.current.bokeh, live.current.relight, live.current.selectedLight) : holdTarget(selected, e.code, live.current.picks);
           // A mask tool open: only the sliders masks have can be held.
           const target = held0 && (!live.current.maskMode || isMaskSlider(held0)) ? held0 : undefined;
           if (target) {
@@ -3214,7 +3587,7 @@ export default function App() {
             setHeld({ sliderId: target, code: e.code });
             return;
           }
-          if (tapPick(selected, e.code)) {
+          if (!creativeOn && tapPick(selected, e.code)) {
             // Picks something in the panel (a band, range, channel) on release.
             e.preventDefault();
             pendingPick = e.code;
@@ -3320,6 +3693,7 @@ export default function App() {
         setHeld(null);
         setHome(false);
         setSelectedPanel(null);
+        setCreativePanel(null);
         setCropping(false);
         setFullFrame(false);
         return;
@@ -3464,6 +3838,7 @@ export default function App() {
         s.crop ?? NO_CROP,
         s.removals ?? NO_REMOVALS,
         s.gradients ?? NO_GRADIENTS,
+        s.creative ?? DEFAULT_CREATIVE,
       );
       if (s.edits?.temperature != null) settings.temperature = s.edits.temperature;
       if (s.edits?.tint != null) settings.tint = s.edits.tint;
@@ -3500,16 +3875,18 @@ export default function App() {
   }, [exporter.openFor, photos, selection, currentPath]);
 
   // Retouch hands its result back as a TIFF next to the RAW: `<name>_retouched.tif`,
-  // then `_retouched-2`, `-3` ... so an earlier pass is never overwritten.
+  // then `_retouched-2`, `-3` ... so an earlier pass is never overwritten. A JPEG original
+  // comes back as a JPEG (`.jpg`): TIFFs are too large for some users (Chris, 22 Nov).
   const handedBack = useRef(new Set<string>());
   const handBackPath = useCallback(
     (source: string) => {
       const slash = Math.max(source.lastIndexOf("/"), source.lastIndexOf("\\"));
       const dir = source.slice(0, slash + 1);
       const base = source.slice(slash + 1).replace(/\.[^.]+$/, "").replace(/_retouched(-\d+)?$/i, "");
+      const ext = /\.jpe?g$/i.test(source) ? "jpg" : "tif";
       const taken = new Set([...Object.keys(photosByPath), ...handedBack.current].map((p) => p.replace(/\\/g, "/").toLowerCase()));
       for (let n = 1; ; n++) {
-        const name = `${base}_retouched${n > 1 ? `-${n}` : ""}.tif`;
+        const name = `${base}_retouched${n > 1 ? `-${n}` : ""}.${ext}`;
         if (!taken.has((dir + name).replace(/\\/g, "/").toLowerCase())) return dir + name;
       }
     },
@@ -3605,6 +3982,24 @@ export default function App() {
   // tab does), the last edits written to their .rpd, then the hand-off TIFFs of every
   // folder opened this session cleared (a cache, ~100 MB each), then the window goes.
   // Closing again while that runs closes straight away.
+  // Moving the window to a monitor with another scale (1.6 to 1) left a white strip on the right
+  // and bottom (Chris, 21 Nov, Linux): WebKitGTK keeps its old size for a moment and paints what it
+  // hasn't drawn white. The web view's own background is set dark (that strip, if any, is then
+  // invisible), and a scale change re-lays the page out.
+  useEffect(() => {
+    void getCurrentWebview()
+      .setBackgroundColor("#080808")
+      .catch(() => undefined);
+    let un: (() => void) | undefined;
+    void getCurrentWindow()
+      .onScaleChanged(() => {
+        window.dispatchEvent(new Event("resize"));
+        requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
+      })
+      .then((u) => (un = u))
+      .catch(() => undefined);
+    return () => un?.();
+  }, []);
   const foldersSeen = useRef(new Set<string>());
   useEffect(() => {
     if (folder) foldersSeen.current.add(folder);
@@ -3829,7 +4224,15 @@ export default function App() {
               clicks; the keys are held below. */}
           <div className="handback-progress handback-progress--lock" role="status">
             <span className="handback-progress__label">
-              {pasteProgress.subjects ? "Updating photos (finding subjects)" : "Updating photos"}: {pasteProgress.done} of {pasteProgress.total}
+              {`${
+                pasteProgress.subjects && pasteProgress.depths
+                  ? "Updating photos (finding subjects and depth)"
+                  : pasteProgress.subjects
+                    ? "Updating photos (finding subjects)"
+                    : pasteProgress.depths
+                      ? "Updating photos (finding depth)"
+                      : "Updating photos"
+              }: ${pasteProgress.done} of ${pasteProgress.total}`}
             </span>
             <div className="handback-progress__bar">
               <div className="handback-progress__fill" style={{ width: `${Math.max(3, (pasteProgress.done / Math.max(1, pasteProgress.total)) * 100)}%` }} />
@@ -3860,6 +4263,11 @@ export default function App() {
           {findingSubject && findingSubject === currentPath && (
             <div className="subject-finding" role="status">
               <Loader2 size={13} className="spin" /> Finding subject…
+            </div>
+          )}
+          {findingDepth && findingDepth === currentPath && !(findingSubject === currentPath) && (
+            <div className="subject-finding" role="status">
+              <Loader2 size={13} className="spin" /> Finding depth…
             </div>
           )}
           {libraryView && !atHome && (
@@ -3907,6 +4315,15 @@ export default function App() {
                 ? (image) => <PickOverlay kind={picker} image={image} onPick={(x, y) => void pickAt(picker, x, y)} onCancel={() => setPicker(null)} />
                 : undefined
             }
+            pictureOverlay={
+              panelMode === "creative"
+                ? creativeShowDepth && creativeDepthImage
+                  ? { src: creativeDepthImage }
+                  : creativeTint && creativeTintImage
+                    ? { src: creativeTintImage }
+                    : null
+                : null
+            }
             onCompareStart={() => compareWith === "before" && requestBefore(currentPath)}
             keysActive={mode === "edit" && !atHome && !cropping && menu === null}
             values={values}
@@ -3952,6 +4369,7 @@ export default function App() {
             ) : gradientTool ? (
               <GradientOverlay
                 image={img}
+                path={currentPath ?? undefined}
                 gradients={gradients}
                 onChange={(list, key) => {
                   if (!currentPath) return;
@@ -3959,6 +4377,9 @@ export default function App() {
                   setGradientsByPath((prev) => withEntry(prev, currentPath, list.length ? list : undefined));
                 }}
                 maskOverlay={maskOverlayFor}
+                depthOverlay={depthOverlayFor}
+                depthAt={depthAtFor}
+                sceneInfo={sceneInfoFor}
                 onPicked={setMaskPicked}
                 showMask={maskShow}
                 onShowMask={() => setMaskShow((v) => !v)}
@@ -3978,6 +4399,8 @@ export default function App() {
                 onRemovePainted={(painted, what) => void removePaintedShape(painted, what)}
                 onRemove={(area, what, outline) => void removeArea(area, what, outline)}
                 onClearAll={clearRemovals}
+                removed={removals.flatMap((r) => (isPatch(r) ? [] : [{ file: r.file, area: r.area }]))}
+                onUndoOne={undoRemoval}
                 onRetry={canRetry ? retryRemove : undefined}
                 onDone={() => {
                   setRemoving(false);
@@ -3986,6 +4409,53 @@ export default function App() {
               />
             )}
           />
+          {/* The Depth Scope popped out over the photo (Creative): its own chunk (lazy). */}
+          {creativeShown && !creativeScopeDocked && currentPath && (
+            <Suspense fallback={null}>
+              <DepthScope
+                key={scopeKey}
+                path={currentPath}
+                lights={lightScope(creative.relight, selectedLight)}
+                planes={{
+                  ...creativeBand,
+                  focus: creativeFocus?.control ?? undefined,
+                  fog: creative.mist.enabled ? creative.mist.start / 100 : undefined,
+                  fogFar: creative.mist.enabled && creative.mist.far > 0 ? creative.mist.far / 100 : undefined,
+                  fogHeight: Math.max(0, Math.min(1, creative.mist.height / 100)),
+                  fadeNear: 0,
+                  fadeFar: 0,
+                }}
+                onPlanesChange={(p, key) => {
+                  if (p.fog !== undefined && Math.abs(p.fog * 100 - creative.mist.start) > 0.01) setMist({ start: Math.max(creative.mist.far, p.fog * 100) }, key);
+                  else if (p.focus !== undefined && creativeFocus && Math.abs(p.focus - creativeFocus.control) > 1e-4) pickFocusAtDepth(p.focus);
+                  else setCreativePlanes(p, key);
+                }}
+                onPick={(control) => pickFocusAtDepth(control)}
+                onRedock={() => setCreativeScopeDocked(true)}
+              />
+            </Suspense>
+          )}
+          {/* The Relight space undocked over the photo, as the Depth Scope is. */}
+          {creativeShown && !relightScopeDocked && currentPath && (
+            <Suspense fallback={null}>
+              <RelightScope
+                key={`relight-${scopeKey}`}
+                path={currentPath}
+                lights={creative.relight.lights}
+                selected={selectedLight}
+                onSelect={setSelectedLight}
+                onMove={(id, patch) => setLight(id, patch, `relight:${id}:place`)}
+                onEdit={setLight}
+                onAdd={(typeId, place) => addLightTo("point", typeId, place)}
+                onRemove={removeLightFrom}
+                ambient={creative.relight.ambient}
+                photoKelvin={values.temperature}
+                onAmbient={(v, key) => setRelight({ ambient: v }, key)}
+                docked={false}
+                onRedock={() => setRelightScopeDocked(true)}
+              />
+            </Suspense>
+          )}
         </div>
         {/* The filmstrip ends above the docked panel, which runs the workspace's full width under it. */}
         {!atHome && !libraryView && (
@@ -3996,6 +4466,51 @@ export default function App() {
           {panelVisible && !home && currentPhoto && (
             <div className="panel-dock" ref={dockRef}>
             <BottomPanel
+              mode={maskMode ? "raw" : panelMode}
+              onMode={changePanelMode}
+              creativePanels={
+                <CreativePanels
+                  path={creativeShown ? currentPath : null}
+                  showNames={showNames}
+                  litPanel={creativePanel}
+                  onLitPanel={setCreativePanel}
+                  onGroupMenu={openPanelMenu}
+                  heldId={held?.sliderId ?? null}
+                  adjustRef={creativeAdjust}
+                  scopeKey={scopeKey}
+                  bokeh={creative.bokeh}
+                  mist={creative.mist}
+                  relight={creative.relight}
+                  onChange={setBokeh}
+                  onMist={setMist}
+                  onRelight={setRelight}
+                  onLight={setLight}
+                  onAddLight={addLightTo}
+                  photoKelvin={values.temperature}
+                  onRemoveLight={removeLightFrom}
+                  selectedLight={selectedLight}
+                  onSelectLight={setSelectedLight}
+                  findingDepth={findingDepth === currentPath}
+                  showDepth={creativeShowDepth}
+                  onShowDepth={() => setCreativeShowDepth((v) => !v)}
+                  pickFocus={picker === "focus"}
+                  onPickFocus={() => togglePicker("focus")}
+                  pickMistStart={picker === "mistStart"}
+                  onPickMistStart={() => togglePicker("mistStart")}
+                  pickSun={picker === "sun"}
+                  onPickSun={() => togglePicker("sun")}
+                  scopeDocked={creativeScopeDocked}
+                  onScopeDocked={setCreativeScopeDocked}
+                  relightScopeDocked={relightScopeDocked}
+                  onRelightScopeDocked={setRelightScopeDocked}
+                  scopeMounted={creativeShown}
+                  focusControl={creativeFocus?.control ?? null}
+                  focusMetres={creativeFocus?.metres ?? null}
+                  zone={creativeZone}
+                  onPlanes={setCreativePlanes}
+                  onScopePick={pickFocusAtDepth}
+                />
+              }
               onGroupMenu={openPanelMenu}
               wbPicking={picker === "wb"}
               onPickWhiteBalance={() => togglePicker("wb")}
@@ -4027,12 +4542,14 @@ export default function App() {
               activeSliderId={held?.sliderId ?? null}
               selectedPanel={selectedPanel}
               onSelectPanel={setSelectedPanel}
+              creativeFocus={creativePanel !== null}
               picks={picks}
               onPicks={onPicks}
               showNames={showNames}
               onToggleNames={toggleNames}
               surround={surround}
               onToggleSurround={toggleSurround}
+              library={libraryView}
               curves={curves}
               histogram={histogram}
               shotLabel={shotLabel}

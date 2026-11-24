@@ -63,5 +63,12 @@ fn main() {
     #[cfg(target_os = "linux")]
     apply_linux_webkit_workarounds();
 
+    // Dev builds on Linux: let a debugger read the app's threads when it hangs (Yama otherwise
+    // only allows the app's own parent). Never in a release build.
+    #[cfg(all(target_os = "linux", debug_assertions))]
+    unsafe {
+        libc::prctl(libc::PR_SET_PTRACER, libc::PR_SET_PTRACER_ANY, 0, 0, 0);
+    }
+
     rapidone_lib::run()
 }

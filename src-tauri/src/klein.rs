@@ -10,7 +10,7 @@
 //!   {"python": "C:/path/to/venv/Scripts/python.exe",
 //!    "model": "C:/path/to/models/FLUX.2-klein-4B",
 //!    "sam": "C:/path/to/models/sam3.1-comfy/checkpoints/sam3.1_multiplex_fp16.safetensors"}
-//! (A bundled environment and a download button come with the release.)
+//! (Not offered in the app now; GPU (Smarter) is `gpumax.rs`, downloaded by `remover_download.rs`.)
 //!
 //! GPU memory: the worker (and the models on the card with it) lives only
 //! while the Remove tool is in use. Opening Remove loads it (`removal::

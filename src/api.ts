@@ -8,6 +8,7 @@ import type { Grade, RangeGrade } from "./grade";
 import { MIXER_COLOURS, type Mixer } from "./mixer";
 import type { AutoTransform } from "./transform";
 import type { FullPreview, PhotoInfo, ScanProgress } from "./types";
+import { DEFAULT_CREATIVE, type Bokeh, type Creative, type Light } from "./creative";
 
 /** Resolves with the paths that failed to decode once the whole scan is done. */
 export function scanFolder(folder: string, scan: number): Promise<string[]> {
@@ -207,6 +208,8 @@ export type RenderSettings = Record<(typeof ENGINE_SLIDERS)[number], number> & {
   profile: ProfileId;
   /** A profile the user added, by name (Documents/RapidOne/Profiles). */
   userProfile?: string;
+  /** The Creative tab's tools (Bokeh; Mist and Relight later). */
+  creative: Creative;
   /** Per band, red .. magenta: [hue, sat, lum]. */
   mixer: [number, number, number][];
   /** Crop, straighten and quarter turns, applied by the engine last. */
@@ -256,6 +259,7 @@ export function engineSettingsFrom(
   crop: Crop,
   removals: Spot[] = [],
   gradients: Gradient[] = [],
+  creative: Creative = DEFAULT_CREATIVE,
 ): RenderSettings {
   const settings = {
     ...Object.fromEntries(ENGINE_SLIDERS.map((k) => [k, values[k] ?? 0])),
@@ -264,6 +268,7 @@ export function engineSettingsFrom(
     // asks for the user's profiles of those names).
     profile: profile.startsWith("user:") ? "shinobiColour" : profile,
     ...(profile.startsWith("user:") ? { userProfile: profile.slice(5) } : {}),
+    creative,
     crop,
     removals,
     gradients,
@@ -380,13 +385,65 @@ export interface RemovalModes {
   medium: boolean;
   lite: boolean;
   mode: RemovalMode;
+  /** GPU (Smarter) is on the graphics card (the Remove bar then shows "GPU OFF"). */
+  gpuLoaded?: boolean;
 }
 
 export function removalModes(): Promise<RemovalModes> {
   return invoke("removal_modes");
 }
 
-/** The Remove bar's Large / Medium / Lite switch. */
+/** GPU (Smarter)'s model download (~4.35 GB, ~7.9 GB on a Mac, the first time it's chosen), shared by every view: it
+ *  carries on with Remove closed. `paused`: stopped by the user (the next start carries on from
+ *  there); `error`: it failed (the message says why and what to do). */
+export interface GpuRemoverDownloadState {
+  running: boolean;
+  done: number;
+  total: number;
+  /** Checking a finished file's checksum (the bar holds still for a few seconds). */
+  checking: boolean;
+  paused: boolean;
+  error: string | null;
+}
+let gpuDl: GpuRemoverDownloadState = { running: false, done: 0, total: 0, checking: false, paused: false, error: null };
+const gpuDlListeners = new Set<() => void>();
+function setGpuDl(next: Partial<GpuRemoverDownloadState>) {
+  gpuDl = { ...gpuDl, ...next };
+  gpuDlListeners.forEach((f) => f());
+}
+export function subscribeGpuRemoverDownload(f: () => void): () => void {
+  gpuDlListeners.add(f);
+  return () => gpuDlListeners.delete(f);
+}
+export function getGpuRemoverDownload(): GpuRemoverDownloadState {
+  return gpuDl;
+}
+/** Starts the download (carries on from a partial one); true once installed. */
+export async function startGpuRemoverDownload(): Promise<boolean> {
+  if (gpuDl.running) return false;
+  setGpuDl({ running: true, checking: false, paused: false, error: null });
+  let unlisten: UnlistenFn | null = null;
+  try {
+    unlisten = await listen<{ done: number; total: number; checking: boolean }>("gpu-remover-download", (e) =>
+      setGpuDl({ done: e.payload.done, total: e.payload.total, checking: e.payload.checking }),
+    );
+    await invoke("download_gpu_remover");
+    setGpuDl({ running: false, checking: false });
+    return true;
+  } catch (e) {
+    const msg = String(e);
+    if (msg === "cancelled") setGpuDl({ running: false, checking: false, paused: true });
+    else setGpuDl({ running: false, checking: false, error: msg });
+    return false;
+  } finally {
+    unlisten?.();
+  }
+}
+export function cancelGpuRemoverDownload(): Promise<void> {
+  return invoke("cancel_gpu_remover_download");
+}
+
+/** The Remove bar's CPU | GPU switch ("lite" = CPU, "medium" = GPU; "large" is no longer offered). */
 export function setRemovalMode(mode: RemovalMode): Promise<void> {
   return invoke("set_removal_mode", { mode });
 }
@@ -531,6 +588,151 @@ export function maskOverlay(path: string, mask: import("./gradients").Gradient):
 /** The photo's subject mask as a PNG (base64), to freeze into a combined mask when it's copied. */
 export function subjectSnapshot(path: string): Promise<string | null> {
   return invoke("subject_snapshot", { path });
+}
+
+/** Finds a photo's depth map ahead of time (kept in the folder's cache), without disturbing the photos being edited. */
+export function findDepth(path: string): Promise<boolean> {
+  return invoke("find_depth", { path });
+}
+
+/** Where a clicked point sits: the control depth (0..1, 1 = nearest), the metres it stands for
+ *  (null for sky or without the scene geometry) and how much of it is sky. */
+export interface DepthAt {
+  control: number;
+  metres: number | null;
+  sky: number;
+}
+
+/** The photo's depth at a position, each a fraction of the upright, uncropped photo, in the depth
+ *  bar's units (0..1, 1 = nearest) and in metres. */
+export function depthAt(path: string, x: number, y: number): Promise<DepthAt> {
+  return invoke("depth_at", { path, x, y });
+}
+
+/** The photo's camera and distance facts: field of view (EXIF preferred, MoGe's kept as a check),
+ *  focal lengths in pixels, the robust near/far anchors the control depth runs between (metres),
+ *  the developed picture's size, and the lens's own focal length and f-number when its EXIF has
+ *  them (the Depth Scope's readout). */
+export interface SceneInfo {
+  fovXDeg: number;
+  fovMogeDeg: number;
+  fovExifDeg: number | null;
+  focal35mm: number | null;
+  focalPx: number;
+  focalPxExif: number | null;
+  dNear: number;
+  dFar: number;
+  width: number;
+  height: number;
+  focalLengthMm: number | null;
+  fNumber: number | null;
+  model: string;
+  ep: string;
+}
+
+/** The photo's scene geometry (null while it isn't there or the models aren't installed). */
+export function sceneInfo(path: string): Promise<SceneInfo | null> {
+  return invoke("scene_info", { path });
+}
+
+/** The lens facts the Bokeh panel shows (null when the photo names no lens). */
+export interface BokehLens {
+  lens: string | null;
+  focalMm: number | null;
+  fNumber: number | null;
+  focal35mm: number | null;
+  sensorWidthMm: number | null;
+  focusDistanceM: number | null;
+  focusSource: "exif" | "click";
+  dNear: number | null;
+  dFar: number | null;
+}
+
+export function bokehLens(path: string): Promise<BokehLens | null> {
+  return invoke("bokeh_lens", { path });
+}
+
+/** Where a click on the photo lands for Bokeh: upright-uncropped fractions and the depth there. */
+export interface BokehFocus {
+  u: number;
+  v: number;
+  control: number;
+  metres: number;
+  sky: number;
+}
+
+export function bokehFocus(path: string, settings: RenderSettings, x: number, y: number, auto = false): Promise<BokehFocus> {
+  return invoke("bokeh_focus", { path, settings, x, y, auto });
+}
+
+/** The photo's pixel nearest a control depth, for the Depth Scope's focus plane. */
+export function bokehFocusNearest(path: string, control: number): Promise<BokehFocus> {
+  return invoke("bokeh_focus_nearest", { path, control });
+}
+
+/** The Depth picture in the Depth Scope's colours while dragging: the focus yellow, the rest
+ *  dimmed, as a translucent PNG data URL. */
+export function bokehTint(path: string, near: number, far: number): Promise<string | null> {
+  return invoke("bokeh_tint", { path, near, far });
+}
+
+/** Where points of the photo's own frame (fractions, upright and uncropped) land on the photo as
+ *  shown (fractions), through the crop, straighten, keystone and quarter turns. */
+export function frameToShown(path: string, settings: RenderSettings, points: [number, number][]): Promise<[number, number][]> {
+  return invoke("frame_to_shown", { path, settings, points });
+}
+
+/** Match the light: a sun fitted to the photo's own shading (Relight); null without normals or
+ *  metric depth. */
+export function relightMatch(path: string): Promise<Light | null> {
+  return invoke("relight_match", { path });
+}
+
+/** The f-number's own sharp zone in control depth, before Focus range, for a focus there; null in
+ *  Manual or without metric depth. */
+export function bokehZone(path: string, bokeh: Bokeh, focus: number): Promise<{ near: number; far: number } | null> {
+  return invoke("bokeh_zone", { path, bokeh, focus });
+}
+
+/** The photo's scene as a point cloud (base64 of "R1PT", a u16 version (2), a u32 count, then 13
+ *  bytes a point: x, y, z as half floats, r, g, b, and u, v as u16), for the Depth Scope; null
+ *  without the scene geometry. */
+export function scenePoints(path: string, maxPoints?: number): Promise<string | null> {
+  return invoke("scene_points", { path, maxPoints });
+}
+
+/** The Depth quality setting, and whether the optional High quality depth model is here. */
+export interface DepthQualityInfo {
+  /** "standard": MoGe-2 alone; "high": with Depth Anything 3 Mono-Large's detail fitted to it. */
+  quality: "standard" | "high";
+  /** Whether the High quality model has been downloaded (or is already on this computer). */
+  hqInstalled: boolean;
+  /** Its download's size, for the offer ("656 MB"). */
+  hqSize: string;
+  hqName: string;
+  /** Whether it could run here at all (ONNX Runtime is there). */
+  hqAvailable: boolean;
+}
+
+/** The Depth quality setting now, and the High quality model's state. */
+export function depthQuality(): Promise<DepthQualityInfo> {
+  return invoke("depth_quality");
+}
+
+/** Sets the Depth quality setting (photos made at the other one are made again). */
+export function setDepthQuality(quality: "standard" | "high"): Promise<void> {
+  return invoke("set_depth_quality", { quality });
+}
+
+/** Downloads the High quality depth model into the app's own models folder: progress arrives as
+ *  `depth-download` ({ done, total } bytes, and `finished` at the end). */
+export function downloadHqDepth(): Promise<boolean> {
+  return invoke("download_hq_depth");
+}
+
+/** The photo's depth as a picture (PNG data URL: warm near, cool far), the depth mask's band in white. */
+export function depthOverlay(path: string, mask: import("./gradients").Gradient | null): Promise<string | null> {
+  return invoke("depth_overlay", { path, mask });
 }
 
 /** A photo rendered with these settings: its fit-to-screen picture and thumbnail (data URL), without disturbing the photos being edited. */

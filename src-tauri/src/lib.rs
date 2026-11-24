@@ -1,9 +1,13 @@
 pub mod adobe;
 pub mod autostyle;
+pub mod bokeh;
+pub mod mist;
+pub mod relight;
 pub mod clarity_net;
 pub mod clarity_net_neg;
 pub mod clarity_unet;
 pub mod commands;
+pub mod creative;
 pub mod crop;
 pub mod dcp;
 pub mod dngcolour;
@@ -18,28 +22,39 @@ pub mod develop;
 pub mod colournoise;
 pub mod defringe;
 pub mod denoise;
+pub mod depth;
+pub mod edges;
+pub mod fusion;
+pub mod hq;
 pub mod diskcache;
+pub mod scene;
 pub mod export;
 pub mod handoff;
 pub mod imagefile;
 pub mod jpeg;
 pub mod tonetable;
 pub mod tools;
+pub mod tiffout;
 pub mod lens;
 pub mod lensfun;
 pub mod lensprofile;
 pub mod mask;
 pub mod keystone;
+pub mod kodak;
 pub mod klein;
 pub mod lite;
 pub mod library;
 pub mod removal;
+pub mod gpumax;
+pub mod rorem;
+pub mod remover_download;
 pub mod patch;
 pub mod pick;
 pub mod pinch;
 pub mod mixtable;
 pub mod pipeline;
 pub mod prof;
+pub mod ortgpu;
 pub mod paramtable;
 pub mod preset;
 pub mod presets;
@@ -88,6 +103,10 @@ pub fn run() {
             if let Ok(dir) = app.path().resource_dir() {
                 crate::mask::set_resource_dir(dir);
             }
+            // The user's own models folder (on-demand downloads: the High quality depth model, RORem).
+            if let Ok(dir) = app.path().app_local_data_dir() {
+                crate::mask::set_app_models_dir(dir);
+            }
             if let Ok(dir) = app.path().document_dir() {
                 crate::userprofiles::set_dir(dir.join("RapidOne").join("Profiles"));
             }
@@ -109,6 +128,21 @@ pub fn run() {
             commands::move_to_unrated,
             commands::clear_handoffs,
             commands::mask_overlay,
+            commands::depth_at,
+            commands::depth_overlay,
+            commands::find_depth,
+            commands::depth_quality,
+            commands::set_depth_quality,
+            commands::download_hq_depth,
+            commands::scene_info,
+            commands::scene_points,
+            commands::bokeh_lens,
+            commands::bokeh_focus,
+            commands::bokeh_focus_nearest,
+            commands::bokeh_tint,
+            commands::bokeh_zone,
+            commands::relight_match,
+            commands::frame_to_shown,
             commands::lens_info,
             commands::pick_colour,
             commands::lens_search,
@@ -144,6 +178,8 @@ pub fn run() {
             commands::render_status,
             commands::set_render_mode,
             commands::set_removal_mode,
+            commands::download_gpu_remover,
+            commands::cancel_gpu_remover_download,
             commands::remove_painted,
             commands::warm_denoise,
             commands::warm_lite,

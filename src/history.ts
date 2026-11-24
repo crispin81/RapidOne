@@ -6,6 +6,7 @@ import type { Mixer } from "./mixer";
 import type { Crop } from "./crop";
 import type { Spot } from "./api";
 import type { Gradient } from "./gradients";
+import type { Creative } from "./creative";
 
 /**
  * Undo / redo, per photo (as Lightroom keeps a history per photo): each step
@@ -31,6 +32,8 @@ export interface Snapshot {
   crop?: Crop;
   removals?: Spot[];
   gradients?: Gradient[];
+  /** The Creative tab (Bokeh now): off or at its defaults means no entry. */
+  creative?: Creative;
 }
 
 export interface History {

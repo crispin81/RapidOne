@@ -168,8 +168,13 @@ pub fn render_part(
     if sx0 > sx1 || sy0 > sy1 {
         return Err("outside the photo".into());
     }
-    // A margin for the tools that look at neighbours (Texture, sharpening, noise).
-    let margin = 64.0 * k as f32;
+    // A margin for the tools that look at neighbours (Texture, sharpening, noise), and for Bokeh
+    // the largest blur the whole photo can have at this scale (4% of its long side), so a tile's
+    // blurred edge matches the whole-photo preview.
+    let mut margin = 64.0 * k as f32;
+    if settings.creative.bokeh.enabled {
+        margin += crate::bokeh::MAX_RADIUS_SHARE * w.max(h) as f32;
+    }
     let (ax0, ay0) = (((sx0 - margin).floor().max(0.0) as usize) / k * k, ((sy0 - margin).floor().max(0.0) as usize) / k * k);
     let (ax1, ay1) = (((sx1 + margin).ceil() as usize).min(w), ((sy1 + margin).ceil() as usize).min(h));
     if ax1 <= ax0 + k || ay1 <= ay0 + k {
@@ -282,6 +287,9 @@ pub fn render_part(
         develop_ms: 0,
         subject_mask: Default::default(),
         subject_refined: Default::default(),
+        depth_map: Default::default(),
+        scene3d: Default::default(),
+        scene_refined: Default::default(),
         denoised: Default::default(),
         colour_cleaned: Default::default(),
     };
@@ -301,8 +309,16 @@ pub fn render_part(
         let mask = preview.subject_mask.get_or_init(|| crate::mask::subject(&preview.image).map(Arc::new));
         s.tools.vignette_map = mask.as_ref().and_then(|m| crate::subject::from_mask(m, preview.image.width, preview.image.height)).map(Arc::new);
     }
-    if s.subject_mask.is_none() && s.gradients.iter().any(crate::gradient::needs_subject) {
+    if s.subject_mask.is_none() && (s.gradients.iter().any(crate::gradient::needs_subject) || (s.creative.bokeh.enabled && s.creative.bokeh.focus_auto) || (s.creative.mist.enabled && s.creative.mist.protect_subject > 0.0)) {
         s.subject_mask = preview.subject_refined();
+    }
+    if s.depth_map.is_none() && (s.gradients.iter().any(crate::gradient::needs_depth) || s.creative.bokeh.enabled || s.creative.mist.enabled || s.creative.relight.enabled) {
+        // Zoomed-in detail is on screen too: only a depth already found (see `depth_field_known`).
+        s.depth_map = preview.depth_field_known();
+    }
+    // Mist's airlight from the whole photo, so this part matches the preview and the export.
+    if s.creative.mist.enabled && s.mist_ambient.is_none() {
+        s.mist_ambient = s.depth_map.as_deref().map(|d| crate::mist::ambient(&preview.image, d));
     }
     let img = crate::commands::render_image(&part, &s).to_rgb8();
 

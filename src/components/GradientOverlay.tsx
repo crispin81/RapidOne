@@ -1,18 +1,34 @@
-import { useEffect, useRef, useState, useLayoutEffect } from "react";
-import { Contrast, Eye, EyeOff, Minus, Paintbrush, Plus, Trash2, UserRound, X } from "lucide-react";
+import { lazy, Suspense, useEffect, useRef, useState, useLayoutEffect } from "react";
+import { Contrast, Cuboid, Eye, EyeOff, Minus, Mountain, Paintbrush, Pipette, Plus, Trash2, UserRound, X } from "lucide-react";
 import { LinearGradientIcon, RadialGradientIcon } from "./GradientIcons";
 import HSlider from "./HSlider";
 import { BarGrip, useFloatingBar } from "../floatingBar";
-import { BRUSH_FEATHER, BRUSH_SIZE, hasSubject, newGradient, SUBJECT_FEATHER, type Gradient, type GradientKind, type MaskPart, type Stroke } from "../gradients";
+import DepthQualityPick from "./DepthQualityPick";
+import { listen } from "@tauri-apps/api/event";
+import { BRUSH_FEATHER, BRUSH_SIZE, DEPTH_FADE, DEPTH_FAR, DEPTH_NEAR, hasSubject, newGradient, SUBJECT_FEATHER, type Gradient, type GradientKind, type MaskPart, type Stroke } from "../gradients";
+import type { DepthAt, SceneInfo } from "../api";
+
+/** The Depth Scope, in its own chunk: it's only fetched the first time the 3D button is used. */
+const DepthScope = lazy(() => import("./DepthScope"));
 
 interface Props {
   /** The displayed photo (uncropped, upright, no keystone while open). */
   image: HTMLImageElement | null;
+  /** The open photo's path, for the Depth Scope's scene geometry (nothing else uses it). */
+  path?: string;
   gradients: Gradient[];
   /** `key` names the change for undo (a drag or a slider counts once). */
   onChange: (gradients: Gradient[], key: string | null) => void;
   /** A mask (any kind, combined or not) as a red overlay over the photo, for the picked mask. */
   maskOverlay?: (mask: Gradient) => Promise<string | null>;
+  /** The photo's depth as a picture (warm near, cool far), for a depth mask; null without one. */
+  depthOverlay?: (mask: Gradient) => Promise<string | null>;
+  /** The photo's depth at a fraction of the photo (0..1, 1 = nearest, and the metres it stands
+   *  for): the depth bar's Pick. */
+  depthAt?: (x: number, y: number) => Promise<DepthAt>;
+  /** The photo's camera and distance facts, for the depth bar's metre labels; null without the
+   *  scene geometry (Depth Anything's fallback has no metres). */
+  sceneInfo?: () => Promise<SceneInfo | null>;
   /** Which mask is picked (-1: none), told to the app: the bottom panel's sliders act on it. */
   onPicked?: (index: number) => void;
   /** Show the picked mask in red (the bottom panel's tick box). */
@@ -45,12 +61,76 @@ const SVG_MARGIN = 2000;
 /** A shape's name and icon in the layers. */
 function kindName(g: Gradient): string {
   if (g.kind === "subject") return g.invert ? "Background" : "Subject";
+  if (g.kind === "depth") return "Depth";
   return g.kind === "brush" ? "Brush" : g.kind === "linear" ? "Linear" : "Radial";
 }
 function kindIcon(kind: GradientKind) {
   if (kind === "subject") return <UserRound size={12} />;
+  if (kind === "depth") return <Mountain size={12} />;
   if (kind === "brush") return <Paintbrush size={12} />;
   return kind === "linear" ? <LinearGradientIcon size={12} /> : <RadialGradientIcon size={12} />;
+}
+
+/** The depth a handle across the bar stands for (near on the left, far on the right), 0..1. */
+const depthOf = (handles: number) => 1 - handles;
+
+/** The metres a control-depth value stands for, read back through the scene's log scale (the
+ *  engine's `Scene3D::metres`). Infinity for the far end, which is where the sky sits. */
+function metresOf(control: number, scene: SceneInfo | null): number | null {
+  if (!scene) return null;
+  if (control <= 0) return Infinity;
+  return scene.dNear * Math.pow(scene.dFar / scene.dNear, 1 - Math.min(1, Math.max(0, control)));
+}
+
+/** A distance as the depth bar shows it: "1.8 m", "24 m", "∞". */
+function metresText(m: number | null): string {
+  if (m === null) return "";
+  if (!Number.isFinite(m)) return "∞";
+  return m < 10 ? `${m.toFixed(1)} m` : `${Math.round(m)} m`;
+}
+
+/**
+ * The depth range bar: near on the left, far on the right, the band between the two handles.
+ * Dragging either end moves that end (it can't cross the other); clicking the bar picks up the
+ * nearer end.
+ */
+function DepthRangeBar({ near, far, onChange }: { near: number; far: number; onChange: (near: number, far: number, key: string | null) => void }) {
+  const track = useRef<HTMLDivElement>(null);
+  const [drag, setDrag] = useState<"near" | "far" | null>(null);
+  const valueAt = (clientX: number): number | null => {
+    const r = track.current?.getBoundingClientRect();
+    if (!r || r.width <= 0) return null;
+    return depthOf(Math.min(1, Math.max(0, (clientX - r.left) / r.width)));
+  };
+  const toBand = (which: "near" | "far", v: number, key: string | null) =>
+    which === "near" ? onChange(Math.max(v, far), far, key) : onChange(near, Math.min(v, near), key);
+  return (
+    <div
+      className="depthbar"
+      ref={track}
+      title="Depth band: the photo's near part on the left, far on the right. Drag an end to move it"
+      onPointerDown={(e) => {
+        if (e.button !== 0) return;
+        const v = valueAt(e.clientX);
+        if (v === null) return;
+        const which = Math.abs(v - near) <= Math.abs(v - far) ? "near" : "far";
+        setDrag(which);
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        toBand(which, v, null);
+      }}
+      onPointerMove={(e) => {
+        if (!drag) return;
+        const v = valueAt(e.clientX);
+        if (v !== null) toBand(drag, v, `depth:${drag}`);
+      }}
+      onPointerUp={() => setDrag(null)}
+      onPointerCancel={() => setDrag(null)}
+    >
+      <div className="depthbar__band" style={{ left: `${(1 - near) * 100}%`, width: `${((near - far) * 100).toFixed(2)}%` }} />
+      <div className={`depthbar__handle${drag === "near" ? " is-on" : ""}`} style={{ left: `${(1 - near) * 100}%` }} title="Near" />
+      <div className={`depthbar__handle${drag === "far" ? " is-on" : ""}`} style={{ left: `${(1 - far) * 100}%` }} title="Far" />
+    </div>
+  );
 }
 
 /** A gradient's handle dragged to `f` (fractions of a photo `aspect` wide): its new shape. */
@@ -97,15 +177,16 @@ function moved(g: Gradient, dx: number, dy: number): Gradient {
 }
 
 /**
- * Linear and radial gradients and subject masks (top bar): drag on the photo
- * to draw a gradient (linear: from full effect to none; radial: from the
- * centre out), then set its sliders. Drag the pin to move it, the handles to
+ * Linear and radial gradients and subject, brush and depth masks (top bar): drag
+ * on the photo to draw a gradient (linear: from full effect to none; radial: from
+ * the centre out), then set its sliders. Drag the pin to move it, the handles to
  * reshape it. Click a pin to pick it. A subject mask needs no drawing: the
  * photo's subject is found for it (shown in red while it's picked), and each
- * photo it's pasted onto finds its own. Delete removes the picked one, Esc /
+ * photo it's pasted onto finds its own. So does a depth mask, whose near-far band
+ * is set on the bar or picked on the photo. Delete removes the picked one, Esc /
  * Done closes.
  */
-export default function GradientOverlay({ image, gradients, onChange, maskOverlay, onPicked, showMask, onShowMask }: Props) {
+export default function GradientOverlay({ image, path, gradients, onChange, maskOverlay, depthOverlay, depthAt, sceneInfo, onPicked, showMask, onShowMask }: Props) {
   const layersBox = useFloatingBar("masks");
   const maskBar = useFloatingBar("masks-bar");
   const layer = useRef<HTMLDivElement>(null);
@@ -158,12 +239,18 @@ export default function GradientOverlay({ image, gradients, onChange, maskOverla
     onChange([...gradients, newGradient("subject", { x: 0.5, y: 0.5 }, { x: 0.5, y: 0.5 })], null);
     setPicked(gradients.length);
   };
+  // A depth mask: no shape either, its band set on the bar (or picked on the photo).
+  const addDepth = () => {
+    onChange([...gradients, newGradient("depth", { x: 0.5, y: 0.5 }, { x: 0.5, y: 0.5 })], null);
+    setPicked(gradients.length);
+  };
   /** Done (or Esc): nothing picked, no new layer waiting; the masks stay open (the Masks button closes them). */
   const finish = () => {
     setTool(null);
     setPartMode(null);
     setPartMenu(null);
     setSelPart(null);
+    setPicking(false);
     setPicked(-1);
   };
   /** A type picked for a new layer (picked again: dropped). */
@@ -173,6 +260,11 @@ export default function GradientOverlay({ image, gradients, onChange, maskOverla
     if (kind === "subject") {
       setTool(null);
       addSubject();
+      return;
+    }
+    if (kind === "depth") {
+      setTool(null);
+      addDepth();
       return;
     }
     setTool((t) => (t === kind ? null : kind));
@@ -199,10 +291,19 @@ export default function GradientOverlay({ image, gradients, onChange, maskOverla
   // mask (its parts added and subtracted, Feather and Invert), so it's exactly what's applied.
   const [overlay, setOverlay] = useState<string | null>(null);
   const shapeKey = sel
-    ? JSON.stringify([sel.kind, sel.full, sel.zero, sel.centre, sel.rx, sel.ry, sel.angle, sel.feather, sel.invert, sel.strokes, sel.parts, sel.frozen?.length])
+    ? JSON.stringify([sel.kind, sel.full, sel.zero, sel.centre, sel.rx, sel.ry, sel.angle, sel.feather, sel.invert, sel.strokes, sel.parts, sel.frozen?.length, sel.near, sel.far, sel.fade])
     : null;
   const selRef = useRef(sel);
   selRef.current = sel;
+  // The tiled detail pass (phase 1c) finished for this photo in the background: the depth picture
+  // is made again, so what's shown is the sharp map rather than the coarse one.
+  const [detailVersion, setDetailVersion] = useState(0);
+  useEffect(() => {
+    const off = listen<{ path?: string }>("depth-detail", (e) => {
+      if (!e.payload?.path || e.payload.path === path) setDetailVersion((v) => v + 1);
+    });
+    return () => void off.then((f) => f());
+  }, [path]);
   useEffect(() => {
     if (!shapeKey || !showMask || !maskOverlay || !selRef.current) {
       setOverlay(null);
@@ -223,7 +324,133 @@ export default function GradientOverlay({ image, gradients, onChange, maskOverla
       stale = true;
       window.clearTimeout(t);
     };
-  }, [shapeKey, showMask, maskOverlay]);
+  }, [shapeKey, showMask, maskOverlay, detailVersion]);
+
+  // A depth mask: Show depth shows the photo's depth as a picture instead (warm near, cool far) with
+  // the band yellow, so its ends can be set against the photo's own shapes; Pick sets the band by
+  // clicking the photo.
+  const [showDepth, setShowDepth] = useState(false);
+  const [depthImage, setDepthImage] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
+  // The photo's scene facts (metres), for the bar's labels: fetched once a depth mask is picked.
+  const [scene, setScene] = useState<SceneInfo | null>(null);
+  useEffect(() => {
+    if (sel?.kind !== "depth" || !sceneInfo) {
+      setScene(null);
+      return;
+    }
+    let stale = false;
+    sceneInfo()
+      .then((s) => {
+        if (!stale) setScene(s);
+      })
+      .catch(() => {
+        if (!stale) setScene(null);
+      });
+    return () => {
+      stale = true;
+    };
+  }, [sel?.kind, picked, sceneInfo]);
+  // The distance a Pick click landed on, shown by the pointer for a moment.
+  const [pickTip, setPickTip] = useState<{ text: string; x: number; y: number } | null>(null);
+  useEffect(() => {
+    if (!pickTip) return;
+    const t = window.setTimeout(() => setPickTip(null), 1800);
+    return () => window.clearTimeout(t);
+  }, [pickTip]);
+  // The Depth Scope: the photo as a 3D point cloud with this band's planes in it. While it's
+  // open, where the pointer is on the photo marks the matching point there (a crosshair), and a
+  // point hovered there marks itself on the photo. Both at most once a frame.
+  const [scopeOpen, setScopeOpen] = useState(false);
+  const [photoHover, setPhotoHover] = useState<{ u: number; v: number } | null>(null);
+  const [scopeHover, setScopeHover] = useState<{ u: number; v: number } | null>(null);
+  const hoverRaf = useRef(0);
+  const hoverWanted = useRef<{ u: number; v: number } | null>(null);
+  const hoverShown = useRef<{ u: number; v: number } | null>(null);
+  const setPhotoHoverAt = (f: Pt | null) => {
+    hoverWanted.current = f ? { u: f.x, v: f.y } : null;
+    if (hoverRaf.current) return;
+    hoverRaf.current = requestAnimationFrame(() => {
+      hoverRaf.current = 0;
+      const next = hoverWanted.current;
+      const prev = hoverShown.current;
+      // Less than a pixel and a half on a big photo: not worth a redraw.
+      if (next && prev && Math.abs(next.u - prev.u) < 0.0015 && Math.abs(next.v - prev.v) < 0.0015) return;
+      hoverShown.current = next;
+      setPhotoHover(next);
+    });
+  };
+  useEffect(() => {
+    if (scopeOpen) return;
+    hoverShown.current = null;
+    setPhotoHover(null);
+    setScopeHover(null);
+  }, [scopeOpen]);
+  useEffect(
+    () => () => {
+      if (hoverRaf.current) cancelAnimationFrame(hoverRaf.current);
+    },
+    [],
+  );
+  const depthShapeKey = sel?.kind === "depth" ? JSON.stringify([sel.near, sel.far, sel.fade, sel.feather, sel.invert]) : null;
+  useEffect(() => {
+    if (!showDepth || !depthShapeKey || !depthOverlay || !selRef.current || selRef.current.kind !== "depth") {
+      setDepthImage(null);
+      return;
+    }
+    let stale = false;
+    const t = window.setTimeout(() => {
+      const s = selRef.current;
+      if (!s || s.kind !== "depth") return;
+      depthOverlay(s)
+        .then((src) => {
+          if (!stale) setDepthImage(src);
+        })
+        .catch(() => {
+          if (!stale) setDepthImage(null);
+        });
+    }, 150);
+    return () => {
+      stale = true;
+      window.clearTimeout(t);
+    };
+  }, [depthShapeKey, showDepth, depthOverlay, detailVersion]);
+  // A new layer picked: not picking, not showing depth, unless it's a depth mask still picked.
+  useEffect(() => {
+    if (sel?.kind !== "depth") {
+      setPicking(false);
+      setShowDepth(false);
+      setScopeOpen(false);
+    }
+  }, [picked, sel?.kind]);
+  /** The band moved to include `d` (0..1): Pick's clicks. */
+  const pickDepth = (d: number, widen: boolean, edge: boolean) => {
+    if (!sel || sel.kind !== "depth") return;
+    const near = sel.near ?? DEPTH_NEAR;
+    const far = sel.far ?? DEPTH_FAR;
+    if (widen) {
+      // Shift: widen the band, keeping the other end where it is.
+      update(picked, { ...sel, near: Math.max(near, d), far: Math.min(far, d) }, "depth:pick");
+    } else if (edge) {
+      // Alt: the end nearest the click moves to it.
+      if (Math.abs(d - near) <= Math.abs(d - far)) update(picked, { ...sel, near: Math.max(d, far) }, "depth:pick");
+      else update(picked, { ...sel, far: Math.min(d, near) }, "depth:pick");
+    } else {
+      // The band's width kept, centred on the click (moved back inside 0..1 at an end).
+      const width = Math.max(0.005, near - far);
+      let n = d + width / 2;
+      let f = d - width / 2;
+      if (n > 1) {
+        n = 1;
+        f = 1 - width;
+      }
+      if (f < 0) {
+        f = 0;
+        n = width;
+      }
+      update(picked, { ...sel, near: n, far: f }, "depth:pick");
+    }
+  };
 
   // Add / Subtract: the next shape drawn (or the subject) becomes a part of the picked mask.
   const [partMenu, setPartMenu] = useState<"add" | "subtract" | null>(null);
@@ -274,6 +501,12 @@ export default function GradientOverlay({ image, gradients, onChange, maskOverla
       setPartMode(null);
       return;
     }
+    if (kind === "depth") {
+      // Its depth band: added (or taken away) straight away, like the subject.
+      setParts([...(sel.parts ?? []), { subtract, shape: newGradient("depth", { x: 0.5, y: 0.5 }, { x: 0.5, y: 0.5 }) }], null);
+      setPartMode(null);
+      return;
+    }
     setTool(null);
     setPartMode({ subtract, kind });
   };
@@ -287,9 +520,15 @@ export default function GradientOverlay({ image, gradients, onChange, maskOverla
       // Typing in a box: its keys are the box's.
       const tgt = e.target as HTMLElement | null;
       if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA" || tgt.tagName === "SELECT" || tgt.isContentEditable)) return;
+      // The Depth Scope has its own keys while it has focus (Esc closes it, R resets the view).
+      if (tgt && tgt.closest(".depthscope")) return;
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopImmediatePropagation();
+        if (picking) {
+          setPicking(false);
+          return;
+        }
         if (partMode || partMenu) {
           setPartMode(null);
           setPartMenu(null);
@@ -309,6 +548,24 @@ export default function GradientOverlay({ image, gradients, onChange, maskOverla
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return;
+    // A depth mask being picked: a click on the photo sets its band (Shift: widen, Alt: one end).
+    if (picking && sel?.kind === "depth" && depthAt) {
+      const f = toFraction(e);
+      if (!f) return;
+      const target = sel;
+      depthAt(f.x, f.y)
+        .then((d) => {
+          // The same mask still picked, its band not moved meanwhile by the bar.
+          if (selRef.current !== target) return;
+          pickDepth(d.control, e.shiftKey, e.altKey);
+          // What was clicked, in metres (the sky has none), by the pointer.
+          const tip = metresText(d.metres === null || d.sky > 0.5 ? Infinity : d.metres);
+          const r = rect();
+          if (r && tip) setPickTip({ text: tip, x: r.left + f.x * r.width, y: r.top + f.y * r.height });
+        })
+        .catch(() => null);
+      return;
+    }
     // A part of the picked mask (Add / Subtract): painted or drawn.
     if (partMode && sel) {
       const f = toFraction(e);
@@ -372,6 +629,7 @@ export default function GradientOverlay({ image, gradients, onChange, maskOverla
     const r = rect();
     const f = toFraction(e);
     if (brushing) setCursor(f);
+    if (scopeOpen) setPhotoHoverAt(f);
     if (!d || !f || !r) return;
     if (d.what === "part-move" || d.what === "part-handle") {
       if (!sel) return;
@@ -548,6 +806,30 @@ export default function GradientOverlay({ image, gradients, onChange, maskOverla
         </g>
       );
     }
+    if (g.kind === "depth") {
+      // A depth mask has no shape to draw either: a pin along the bottom left for each, to pick it
+      // (the subject's pins are along the bottom right, the layers top right, the zoom top left).
+      const n = gradients.slice(0, i).filter((o) => o.kind === "depth").length;
+      const x = 18 + n * 26;
+      const y = H - 18;
+      return (
+        <g key={i} className={on ? "gradient-shape gradient-shape--on" : "gradient-shape"}>
+          <circle
+            className="gradient-pin gradient-pin--depth"
+            cx={x}
+            cy={y}
+            r={9}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              setPicked(i);
+            }}
+          />
+          <text className="gradient-pin__label" x={x} y={y + 4} textAnchor="middle">
+            D
+          </text>
+        </g>
+      );
+    }
     if (g.kind === "subject") {
       // No shape: a pin along the bottom right of the photo for each subject mask, to pick it
       // (S: on the subject, B: inverted, on the background). The zoom buttons are top left, the layers top right.
@@ -616,6 +898,9 @@ export default function GradientOverlay({ image, gradients, onChange, maskOverla
     );
   };
 
+  // What's shown over the photo: the picked mask in red, or a depth mask's own depth picture.
+  const shownOverlay = sel?.kind === "depth" && showDepth ? depthImage : overlay;
+
   return (
     <div
       className={`remove-layer gradient-layer${brushing ? " gradient-layer--brush" : ""}`}
@@ -623,10 +908,18 @@ export default function GradientOverlay({ image, gradients, onChange, maskOverla
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      onPointerLeave={() => setCursor(null)}
+      onPointerLeave={() => {
+        setCursor(null);
+        if (scopeOpen) setPhotoHoverAt(null);
+      }}
     >
-      {p && overlay && (
-        <img className="gradient-subject" src={overlay} alt="" draggable={false} style={{ left: p.left, top: p.top, width: p.width, height: p.height }} />
+      {p && shownOverlay && (
+        <img className="gradient-subject" src={shownOverlay} alt="" draggable={false} style={{ left: p.left, top: p.top, width: p.width, height: p.height }} />
+      )}
+      {p && pickTip && (
+        <div className="depth-tip" style={{ left: pickTip.x, top: pickTip.y }}>
+          {pickTip.text}
+        </div>
       )}
       {p && (
         // A margin round the photo (same coordinates inside): pins and lines off the photo are in the
@@ -725,6 +1018,14 @@ export default function GradientOverlay({ image, gradients, onChange, maskOverla
               <circle cx={cursor.x * p.width} cy={cursor.y * p.height} r={brushSize * p.width * (1 - brushFeather / 100)} className="gradient-cursor__inner" />
             </g>
           )}
+          {/* A point hovered in the Depth Scope, marked where it is on the photo. */}
+          {scopeOpen && scopeHover && (
+            <g className="scope-hover" transform={`translate(${(scopeHover.u * p.width).toFixed(1)} ${(scopeHover.v * p.height).toFixed(1)})`}>
+              <circle r={8} />
+              <line x1={-14} y1={0} x2={14} y2={0} />
+              <line x1={0} y1={-14} x2={0} y2={14} />
+            </g>
+          )}
         </svg>
       )}
       {/* The layers: each mask, its own shape and the shapes added (+) or taken away (−). */}
@@ -746,6 +1047,9 @@ export default function GradientOverlay({ image, gradients, onChange, maskOverla
           <div className="masklayers__new">
             <button type="button" onClick={() => startLayer("subject")} title="New subject layer: the photo's main subject, found for you (pasted onto other photos, each finds its own, until it has + / − shapes)">
               <UserRound size={14} />
+            </button>
+            <button type="button" onClick={() => startLayer("depth")} title="New depth layer: everything between a near and a far distance, found for you (Pick on the bar calibrates it)">
+              <Mountain size={14} />
             </button>
             <button type="button" className={tool === "brush" ? "is-on" : undefined} onClick={() => startLayer("brush")} title="New brush layer: paint on the photo (Alt: erase)">
               <Paintbrush size={14} />
@@ -826,6 +1130,11 @@ export default function GradientOverlay({ image, gradients, onChange, maskOverla
                         <UserRound size={12} /> Subject
                       </button>
                     )}
+                    {!(g.kind === "depth" || g.parts?.some((p) => p.shape.kind === "depth")) && (
+                      <button type="button" onClick={() => choosePart("depth")}>
+                        <Mountain size={12} /> Depth
+                      </button>
+                    )}
                     <button type="button" onClick={() => choosePart("brush")}>
                       <Paintbrush size={12} /> Brush
                     </button>
@@ -885,6 +1194,26 @@ export default function GradientOverlay({ image, gradients, onChange, maskOverla
           })}
         </div>
       )}
+      {/* The Depth Scope: the photo as a 3D point cloud, with this depth mask's near and far
+          planes. Its own chunk (lazy), so the main bundle doesn't grow. */}
+      {scopeOpen && sel?.kind === "depth" && path && (
+        <Suspense fallback={null}>
+          <DepthScope
+            path={path}
+            planes={{
+              near: sel.near ?? DEPTH_NEAR,
+              far: sel.far ?? DEPTH_FAR,
+              fadeNear: sel.fade ?? DEPTH_FADE,
+              fadeFar: sel.fade ?? DEPTH_FADE,
+            }}
+            onPlanesChange={(p, key) => update(picked, { ...sel, near: p.near, far: p.far, fade: p.fadeNear ?? sel.fade }, key)}
+            onPick={(control, mods) => pickDepth(control, mods.widen, mods.edge)}
+            hoverUV={photoHover}
+            onHoverUV={setScopeHover}
+            onClose={() => setScopeOpen(false)}
+          />
+        </Suspense>
+      )}
       {/* The bar: only with something in it (brush settings, a new layer's hint, the picked layer's). */}
       {(brushing || tool || sel) && (
       <div ref={maskBar.ref} style={maskBar.style} className="cropbar removebar gradientbar" onPointerDown={(e) => e.stopPropagation()}>
@@ -913,6 +1242,74 @@ export default function GradientOverlay({ image, gradients, onChange, maskOverla
           </span>
         ) : sel ? (
           <>
+            {sel.kind === "depth" && (
+              <>
+                <button
+                  type="button"
+                  className={picking ? "is-on" : undefined}
+                  onClick={() => setPicking((v) => !v)}
+                  title="Pick: click the photo to put the band at that depth, its width kept (Shift-click: widen it to include the click; Alt-click: move the end nearer the click; Esc: done)"
+                >
+                  <Pipette size={13} /> Pick
+                </button>
+                <button
+                  type="button"
+                  className={scopeOpen ? "is-on" : undefined}
+                  onClick={() => setScopeOpen((v) => !v)}
+                  disabled={!path}
+                  title="Depth Scope: the photo as a 3D point cloud, with this band's near and far planes in it (drag a plane or its label to move it; click a point to Pick there)"
+                >
+                  <Cuboid size={13} /> 3D
+                </button>
+                <label className="check" title="Show the photo's depth as a picture over it: warm where it's near, cool where it's far, the band yellow">
+                  <input type="checkbox" checked={showDepth} onChange={() => setShowDepth((v) => !v)} />
+                  Show depth
+                </label>
+                <DepthQualityPick />
+                <label className="gradientbar__slider gradientbar__slider--depth" title="The band: near on the left, far on the right (1 nearest, 0 farthest). Drag either end">
+                  <span>Near</span>
+                  <DepthRangeBar
+                    near={sel.near ?? DEPTH_NEAR}
+                    far={sel.far ?? DEPTH_FAR}
+                    onChange={(n, f, key) => update(picked, { ...sel, near: n, far: f }, key)}
+                  />
+                  <span>Far</span>
+                  {/* The band in metres (the far end is where the sky sits): the same numbers in
+                      the units a lens works in. */}
+                  {scene && (
+                    <span className="gradientbar__value depthbar__metres" title="The band's distances in metres: the near end and the far end (the sky is at infinity)">
+                      {metresText(metresOf(sel.near ?? DEPTH_NEAR, scene))} – {metresText(metresOf(sel.far ?? DEPTH_FAR, scene))}
+                    </span>
+                  )}
+                </label>
+                <label className="gradientbar__slider" title="Fade: how gradually the band eases off beyond Near and Far (double-click: back to the start)">
+                  <span>Fade</span>
+                  <HSlider
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={Math.round((sel.fade ?? DEPTH_FADE) * 100)}
+                    reset={Math.round(DEPTH_FADE * 100)}
+                    onChange={(v) => update(picked, { ...sel, fade: v / 100 }, `gradient:${picked}:fade`)}
+                    aria-label="Fade"
+                  />
+                  <span className="gradientbar__value">{Math.round((sel.fade ?? DEPTH_FADE) * 100)}</span>
+                </label>
+                <label className="gradientbar__slider" title="Feather: how soft the band's edge is beyond its Fade (double-click: none)">
+                  <span>Feather</span>
+                  <HSlider
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={sel.feather}
+                    reset={0}
+                    onChange={(v) => update(picked, { ...sel, feather: v }, `gradient:${picked}:feather`)}
+                    aria-label="Feather"
+                  />
+                  <span className="gradientbar__value">{Math.round(sel.feather)}</span>
+                </label>
+              </>
+            )}
             {sel.kind === "subject" && (
               <>
                 <label className="gradientbar__slider" title="Feather: how soft the mask's edge is (0: the model's own edge; double-click: back to the start)">

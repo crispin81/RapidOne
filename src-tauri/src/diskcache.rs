@@ -6,6 +6,11 @@
 //!   and the settings it was rendered with, so it's shown at once if the edit
 //!   hasn't changed since.
 //! - `<photo>.mask.png`: the subject mask (`mask.rs`), about 3 s saved.
+//! - `<photo>.depth.png`: the depth map's control values (`scene.rs`/`depth.rs`: 16-bit, 1 = nearest,
+//!   sky 0), at the model's own size, with `<photo>.depth.version` beside it: phase 1 wrote a
+//!   *relative* map under the same name, and its version says which layout the file has.
+//! - `<photo>.scene.bin`: the scene geometry (`scene.rs`: metric distances, normals, sky, focal,
+//!   field of view, anchors), at the model's own size.
 
 use crate::commands::DevelopedPreview;
 use crate::mask::Mask;
@@ -135,4 +140,139 @@ pub fn save_mask(photo: &Path, mask: &Mask) -> Result<(), String> {
     let mut png = Vec::new();
     img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).map_err(|e| e.to_string())?;
     write(&file(photo, "mask.png").ok_or("no cache folder")?, &png)
+}
+
+/// The depth cache's layout: 2 is the control depth (1 = nearest, 0 = farthest, sky 0), which
+/// phase 1's relative map (no version file) isn't: those are recomputed once. Beside the version
+/// the marker says where it came from - "scene" (MoGe-2's control depth) or "relative" (Depth
+/// Anything's fallback) - so the fallback is redone once the scene models are there.
+const DEPTH_VERSION: u32 = 2;
+
+/// The depth cache marker's words: `"<version> <source>"`.
+fn marker(source: &str) -> String {
+    format!("{DEPTH_VERSION} {source}")
+}
+
+/// The photo's depth map (`scene.rs`/`depth.rs`), if it's been found before: the control values,
+/// 16-bit greyscale (its 518-odd pixels of depth need the range, not just 256 levels).
+pub fn load_depth(photo: &Path) -> Option<crate::depth::DepthMap> {
+    let marker = std::fs::read_to_string(file(photo, "depth.version")?).ok()?;
+    if marker.split_whitespace().next()?.parse::<u32>().ok()? != DEPTH_VERSION {
+        return None;
+    }
+    crate::depth::from_png16(&std::fs::read(file(photo, "depth.png")?).ok()?)
+}
+
+pub fn save_depth(photo: &Path, map: &crate::depth::DepthMap) -> Result<(), String> {
+    write(&file(photo, "depth.png").ok_or("no cache folder")?, &crate::depth::to_png16(map)?)?;
+    write(&file(photo, "depth.version").ok_or("no cache folder")?, marker("scene").as_bytes())
+}
+
+/// Depth Anything's relative map as the fallback: as `save_depth`, marked as the fallback.
+pub fn save_depth_relative(photo: &Path, map: &crate::depth::DepthMap) -> Result<(), String> {
+    write(&file(photo, "depth.png").ok_or("no cache folder")?, &crate::depth::to_png16(map)?)?;
+    write(&file(photo, "depth.version").ok_or("no cache folder")?, marker("relative").as_bytes())
+}
+
+/// Whether the cached depth map is Depth Anything's fallback (not the scene's control depth).
+pub fn depth_is_relative(photo: &Path) -> bool {
+    file(photo, "depth.version").is_some_and(|p| std::fs::read_to_string(p).is_ok_and(|m| m.contains("relative")))
+}
+
+/// Whether the photo's control depth is cached (in the current layout).
+pub fn has_depth(photo: &Path) -> bool {
+    file(photo, "depth.version").is_some_and(|p| p.is_file()) && file(photo, "depth.png").is_some_and(|p| p.is_file())
+}
+
+/// Whether the photo's scene geometry is cached.
+pub fn has_scene(photo: &Path) -> bool {
+    file(photo, "scene.bin").is_some_and(|p| p.is_file())
+}
+
+/// The photo's scene geometry (`scene.rs`), if it's been found before: MoGe-2's metric points,
+/// normals, sky mask, focal and field of view, at the model's own size.
+pub fn load_scene(photo: &Path) -> Option<crate::scene::Scene3D> {
+    crate::scene::from_bytes(&std::fs::read(file(photo, "scene.bin")?).ok()?)
+}
+
+pub fn save_scene(photo: &Path, scene: &crate::scene::Scene3D) -> Result<(), String> {
+    write(&file(photo, "scene.bin").ok_or("no cache folder")?, &crate::scene::to_bytes(scene))?;
+    // Which Depth quality made it (phase 1c): a photo made at the other quality is made again.
+    let quality = if scene.model.contains("DA3") { "high" } else { "standard" };
+    write(&file(photo, "scene.quality").ok_or("no cache folder")?, quality.as_bytes())
+}
+
+/// The Depth quality the photo's scene was made at ("standard" or "high"), if it says.
+pub fn scene_quality(photo: &Path) -> Option<String> {
+    std::fs::read_to_string(file(photo, "scene.quality")?).ok().map(|s| s.trim().to_string())
+}
+
+/// Records the quality a photo's depth was made at (the fallback map has no scene to ask).
+pub fn save_scene_quality(photo: &Path, quality: &str) -> Result<(), String> {
+    write(&file(photo, "scene.quality").ok_or("no cache folder")?, quality.as_bytes())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_depth_cache_file_round_trips_through_the_folder() {
+        let dir = std::env::temp_dir().join(format!("rapidone-depth-cache-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let photo = dir.join("P1000123.RAF");
+        assert!(load_depth(&photo).is_none(), "nothing cached yet");
+        let map = crate::depth::DepthMap { w: 4, h: 3, data: (0..12).map(|i| i as f32 / 11.0).collect() };
+        save_depth(&photo, &map).unwrap();
+        assert!(photo.with_file_name("sidecars").join("cache").join("P1000123.RAF.depth.png").is_file());
+        let back = load_depth(&photo).unwrap();
+        assert_eq!((back.w, back.h), (4, 3));
+        for (a, b) in map.data.iter().zip(&back.data) {
+            assert!((a - b).abs() < 1e-4);
+        }
+        // A file from phase 1 (no version, or another one) is ignored, so it's recomputed once.
+        let version = photo.with_file_name("sidecars").join("cache").join("P1000123.RAF.depth.version");
+        std::fs::write(&version, b"1").unwrap();
+        assert!(load_depth(&photo).is_none());
+        std::fs::remove_file(&version).unwrap();
+        assert!(load_depth(&photo).is_none());
+        // The fallback's marker: the same layout, but it says so (so it's redone when the scene
+        // models are there), and the scene's own is the preferred one.
+        assert!(!depth_is_relative(&photo), "no marker: nothing to upgrade");
+        save_depth_relative(&photo, &map).unwrap();
+        assert!(load_depth(&photo).is_some() && depth_is_relative(&photo));
+        save_depth(&photo, &map).unwrap();
+        assert!(!depth_is_relative(&photo));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_scene_cache_file_round_trips_through_the_folder() {
+        let dir = std::env::temp_dir().join(format!("rapidone-scene-cache-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let photo = dir.join("DSC_0094.NEF");
+        assert!(load_scene(&photo).is_none(), "nothing cached yet");
+        let scene = crate::scene::Scene3D {
+            w: 2,
+            h: 2,
+            distance: vec![1.5, 2.0, 3.0, f32::INFINITY],
+            control: crate::gradient::Grid { w: 2, h: 2, data: vec![1.0, 0.6, 0.2, 0.0] },
+            normals: std::sync::Arc::new(vec![[0.0, 0.0, 1.0]; 4]),
+            sky: crate::gradient::Grid { w: 2, h: 2, data: vec![0.0, 0.0, 0.0, 1.0] },
+            fov_x_deg: 74.0,
+            focal_px: 620.0,
+            d_near: 1.4,
+            d_far: 9.0,
+            model: "MoGe-2 ViT-S",
+            detail: None,
+            edges: std::sync::OnceLock::new(),
+        };
+        save_scene(&photo, &scene).unwrap();
+        assert!(photo.with_file_name("sidecars").join("cache").join("DSC_0094.NEF.scene.bin").is_file());
+        let back = load_scene(&photo).expect("its own file");
+        assert_eq!((back.w, back.h, back.model), (2, 2, "MoGe-2 ViT-S"));
+        assert!((back.fov_x_deg - 74.0).abs() < 1e-4 && (back.focal_px - 620.0).abs() < 0.5);
+        assert!(back.distance[3].is_infinite() && (back.distance[1] - 2.0).abs() < 0.01);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

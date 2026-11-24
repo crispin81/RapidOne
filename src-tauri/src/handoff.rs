@@ -9,6 +9,10 @@
 //! photos, whose noise barely compresses): RapidRetouch reads TIFFs with
 //! tifffile, which decodes both with Python's own zlib and numpy (no extra
 //! codec package needed).
+//!
+//! A JPEG original goes as a JPEG instead (quality 100, full-resolution colour), and comes back from
+//! Retouch as a JPEG (`App.tsx` `handBackPath`): TIFFs are too large for some users, and a JPEG
+//! has no more to give than 8 bits (Chris, 22 Nov). RAWs and TIFFs go as TIFFs, as before.
 
 use std::fs::File;
 use std::io::BufWriter;
@@ -35,7 +39,7 @@ pub fn clear(folders: &[PathBuf]) -> u64 {
         for e in entries.flatten() {
             let p = e.path();
             let name = p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
-            if p.is_file() && (name.ends_with(".tif") || name.ends_with(".key") || name.ends_with(".tif.tmp")) {
+            if p.is_file() && [".tif", ".jpg", ".key", ".tif.tmp", ".jpg.tmp"].iter().any(|e| name.ends_with(e)) {
                 let size = e.metadata().map(|m| m.len()).unwrap_or(0);
                 if std::fs::remove_file(&p).is_ok() {
                     freed += size;
@@ -48,13 +52,22 @@ pub fn clear(folders: &[PathBuf]) -> u64 {
     freed
 }
 
+/// A JPEG original's hand-off: the highest quality, as Retouch saves it back (it is saved a second time there).
+const HANDOFF_JPEG_QUALITY: u8 = 100;
+
 /// Larger than any sensor: develop at full resolution.
 const FULL_RESOLUTION: usize = 1 << 20;
+
+/// A JPEG original: handed to Retouch (and back) as a JPEG.
+pub fn is_jpeg(photo: &Path) -> bool {
+    photo.extension().map(|e| e.to_string_lossy().to_lowercase()).is_some_and(|e| e == "jpg" || e == "jpeg")
+}
 
 fn files(photo: &Path) -> Option<(PathBuf, PathBuf)> {
     let name = photo.file_name()?.to_string_lossy().to_string();
     let dir = photo.parent()?.join("sidecars").join("handoff");
-    Some((dir.join(format!("{name}.tif")), dir.join(format!("{name}.key"))))
+    let ext = if is_jpeg(photo) { "jpg" } else { "tif" };
+    Some((dir.join(format!("{name}.{ext}")), dir.join(format!("{name}.key"))))
 }
 
 /// The hand-off TIFF for `photo` graded with `settings`, rendered if it's
@@ -70,8 +83,23 @@ pub fn render(photo: &Path, settings: &crate::pipeline::RenderSettings, key: &st
     if let Some(mask) = crate::diskcache::load_mask(photo) {
         let _ = scene.subject_mask.set(Some(std::sync::Arc::new(mask)));
     }
-    let img = crate::commands::render_image16(&scene, settings);
+    if let Some(map) = crate::diskcache::load_depth(photo) {
+        let _ = scene.depth_map.set(Some(std::sync::Arc::new(map)));
+    }
+    if let Some(s) = crate::diskcache::load_scene(photo) {
+        let _ = scene.scene3d.set(Some(std::sync::Arc::new(s)));
+    }
     std::fs::create_dir_all(tif.parent().ok_or("no folder")?).map_err(|e| e.to_string())?;
+    if is_jpeg(photo) {
+        let img = crate::commands::render_image(&scene, settings).to_rgb8();
+        let tmp = tif.with_extension("jpg.tmp");
+        let bytes = crate::jpeg::encode(img.as_raw(), img.width(), img.height(), HANDOFF_JPEG_QUALITY)?;
+        std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
+        std::fs::rename(&tmp, &tif).map_err(|e| e.to_string())?;
+        std::fs::write(&key_file, key).map_err(|e| e.to_string())?;
+        return Ok(tif);
+    }
+    let img = crate::commands::render_image16(&scene, settings);
     // Through a temporary file and a rename, so RapidRetouch never reads half a file.
     let tmp = tif.with_extension("tif.tmp");
     {
@@ -114,5 +142,19 @@ mod clear_tests {
         assert!(root.join("rated").join("A_retouched.tif").is_file());
         assert!(root.join("rated").join("sidecars").join("A.NEF.rpd").is_file());
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod jpeg_tests {
+    use super::*;
+
+    #[test]
+    fn a_jpeg_goes_to_retouch_as_a_jpeg_and_raws_and_tiffs_as_tiffs() {
+        let name = |p: &str| files(Path::new(p)).unwrap().0.file_name().unwrap().to_string_lossy().to_string();
+        assert_eq!(name("/s/P1.jpg"), "P1.jpg.jpg");
+        assert_eq!(name("/s/P1.JPEG"), "P1.JPEG.jpg");
+        assert_eq!(name("/s/P1.RAF"), "P1.RAF.tif");
+        assert_eq!(name("/s/P1.tif"), "P1.tif.tif");
     }
 }

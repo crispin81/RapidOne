@@ -38,10 +38,16 @@ export interface SliderDef {
    * 3000-8000 K gets most of the track.
    */
   scale?: "linear" | "mired";
+  /** Run the other way up the track (the light's Kelvin: low K is warm, at the top). */
+  reverse?: boolean;
   /** Hover text, when it should say more than the label ("Kelvin (Temperature)"). */
   tooltip?: string;
   /** Value meaning "unchanged" (0 for most; 100 for Scale). */
   neutral: number;
+  /** The readout in other units than the value (a flash's power in watt-seconds), and a typed
+   *  number in those units back to a value. */
+  format?: (value: number) => string;
+  parse?: (typed: number) => number;
 }
 
 export interface SliderGroup {
@@ -305,6 +311,7 @@ export function clampToSlider(def: SliderDef, value: number): number {
 }
 
 export function formatValue(def: SliderDef, value: number): string {
+  if (def.format) return def.format(value);
   const text = value.toFixed(def.decimals);
   return value > 0 && (def.lowest ?? def.min) < 0 ? `+${text}` : text;
 }
@@ -337,6 +344,7 @@ const SHORT_NAMES: Record<string, string> = {
   "Shadow tint": "Tint",
   Luminance: "Lum",
   Blending: "Blend",
+  Brightness: "Bright",
 };
 
 export function shortName(label: string): string {
@@ -356,24 +364,28 @@ export function modifierSymbol(modifier: Modifier): string {
  */
 export function nudge(def: SliderDef, value: number, direction: 1 | -1, coarse: boolean): number {
   const step = coarse ? def.coarseStep : def.step;
+  // On a reversed track (Kelvin), ↑ moves the knob up the track, which is the lower value.
+  const dir = def.reverse ? (-direction as 1 | -1) : direction;
   const grid = value / step;
   const nearest = Math.round(grid);
-  const base = Math.abs(grid - nearest) < 0.06 ? nearest : direction > 0 ? Math.floor(grid) : Math.ceil(grid);
-  return clampToSlider(def, (base + direction) * step);
+  const base = Math.abs(grid - nearest) < 0.06 ? nearest : dir > 0 ? Math.floor(grid) : Math.ceil(grid);
+  return clampToSlider(def, (base + dir) * step);
 }
 
 /** Where a value sits along the track, 0 (bottom) to 1 (top). */
 export function toFraction(def: SliderDef, value: number): number {
-  if (def.scale === "mired") {
-    const f = (1 / def.min - 1 / value) / (1 / def.min - 1 / def.max);
-    return Math.min(1, Math.max(0, f));
-  }
-  return Math.min(1, Math.max(0, (value * (def.stretch ?? 1) - def.min) / (def.max - def.min)));
+  const f =
+    def.scale === "mired"
+      ? (1 / def.min - 1 / value) / (1 / def.min - 1 / def.max)
+      : (value * (def.stretch ?? 1) - def.min) / (def.max - def.min);
+  const clamped = Math.min(1, Math.max(0, f));
+  return def.reverse ? 1 - clamped : clamped;
 }
 
 /** The value at a position along the track (0..1). */
 export function fromFraction(def: SliderDef, f: number): number {
-  const t = Math.min(1, Math.max(0, f));
+  const clamped = Math.min(1, Math.max(0, f));
+  const t = def.reverse ? 1 - clamped : clamped;
   if (def.scale === "mired") {
     return 1 / (1 / def.min - t * (1 / def.min - 1 / def.max));
   }

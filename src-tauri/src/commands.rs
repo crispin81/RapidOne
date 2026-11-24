@@ -401,6 +401,11 @@ pub struct SceneCache {
 const SCENE_CACHE_SIZE: usize = 6;
 
 impl SceneCache {
+    /// The photo's scene if it's in the cache already (never develops it).
+    fn peek(&self, path: &str) -> Option<Arc<crate::develop::Scene>> {
+        self.entries.lock().unwrap().iter().find(|(p, _)| p == path).map(|(_, s)| s.clone())
+    }
+
     /// The photo at most `long` on its long side (made once from the cached
     /// one); the cached one itself when that is already no bigger.
     fn get_small(&self, path: &str, long: usize) -> Result<Arc<crate::develop::Scene>, String> {
@@ -411,7 +416,11 @@ impl SceneCache {
         }
         let key = (path.to_string(), long);
         if let Some((_, s)) = self.small.lock().unwrap().iter().find(|(k, _)| *k == key) {
-            return Ok(s.clone());
+            // Made before the whole photo's depth was found: made again, to carry it.
+            let stale = (s.depth_map.get().is_none() && scene.depth_map.get().is_some()) || (s.scene3d.get().is_none() && scene.scene3d.get().is_some());
+            if !stale {
+                return Ok(s.clone());
+            }
         }
         let small = Arc::new(crate::develop::Scene {
             image: scene.image.downscaled(long),
@@ -426,6 +435,9 @@ impl SceneCache {
             // The whole photo's subject mask, if found already (it's the same frame).
             subject_mask: scene.subject_mask.get().cloned().map(std::sync::OnceLock::from).unwrap_or_default(),
             subject_refined: scene.subject_refined.get().cloned().map(std::sync::OnceLock::from).unwrap_or_default(),
+            depth_map: scene.depth_map.get().cloned().map(std::sync::OnceLock::from).unwrap_or_default(),
+            scene3d: scene.scene3d.get().cloned().map(std::sync::OnceLock::from).unwrap_or_default(),
+            scene_refined: scene.scene_refined.get().cloned().map(std::sync::OnceLock::from).unwrap_or_default(),
             denoised: Default::default(),
             colour_cleaned: Default::default(),
         });
@@ -453,6 +465,16 @@ impl SceneCache {
         // Its subject mask, if found before (kept in the folder's cache), so subject masks render at once.
         if let Some(m) = crate::diskcache::load_mask(Path::new(path)) {
             let _ = scene.subject_mask.set(Some(Arc::new(m)));
+        }
+        // As its depth map: the PNG is the model's own output (its size is the photo's frame), so
+        // a depth mask renders at once too.
+        if let Some(d) = crate::diskcache::load_depth(Path::new(path)) {
+            let _ = scene.depth_map.set(Some(Arc::new(d)));
+        }
+        // And its scene geometry (metric distances, normals, sky, field of view), for the depth
+        // bar's metres and the Depth Scope.
+        if let Some(s) = crate::diskcache::load_scene(Path::new(path)) {
+            let _ = scene.scene3d.set(Some(Arc::new(s)));
         }
         let mut entries = self.entries.lock().unwrap();
         entries.retain(|(p, _)| p != path);
@@ -527,6 +549,38 @@ pub fn render_image16(
     }
 }
 
+thread_local! {
+    /// On-screen renders (`render_preview`, `render_detail`): depth only if it's known already,
+    /// and whether one went without it (so its picture isn't kept as the photo's finished preview).
+    static DEPTH_KNOWN_ONLY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static DEPTH_MISSING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Runs `f` as an on-screen render: it never runs a depth model; returns whether it lacked depth.
+fn on_screen<T>(f: impl FnOnce() -> T) -> (T, bool) {
+    DEPTH_KNOWN_ONLY.with(|c| c.set(true));
+    DEPTH_MISSING.with(|c| c.set(false));
+    let out = f();
+    DEPTH_KNOWN_ONLY.with(|c| c.set(false));
+    (out, DEPTH_MISSING.with(|c| c.replace(false)))
+}
+
+/// The photo's depth maps from the folder's cache, into a scene that was developed before they
+/// were found (by `find_depth` in the background): then an on-screen render can use them.
+fn load_known_depth(scene: &crate::develop::Scene, path: &str) {
+    let photo = Path::new(path);
+    if scene.depth_map.get().is_none() && crate::diskcache::has_depth(photo) {
+        if let Some(d) = crate::diskcache::load_depth(photo) {
+            let _ = scene.depth_map.set(Some(Arc::new(d)));
+        }
+    }
+    if scene.scene3d.get().is_none() && crate::diskcache::has_scene(photo) {
+        if let Some(s) = crate::diskcache::load_scene(photo) {
+            let _ = scene.scene3d.set(Some(Arc::new(s)));
+        }
+    }
+}
+
 fn render_image_depth(scene: &crate::develop::Scene, settings: &crate::pipeline::RenderSettings, sixteen: bool) -> image::DynamicImage {
     use image::DynamicImage::{ImageRgb16, ImageRgb8};
     // Subject-aware vignette: the subject mask (found once per photo, kept with
@@ -543,11 +597,44 @@ fn render_image_depth(scene: &crate::develop::Scene, settings: &crate::pipeline:
     };
     // Subject masks: the photo's own subject mask (found once per photo, kept with its scene).
     let with_subject;
-    let settings = if settings.subject_mask.is_none() && settings.gradients.iter().any(crate::gradient::needs_subject) {
+    let settings = if settings.subject_mask.is_none()
+        && (settings.gradients.iter().any(crate::gradient::needs_subject)
+            || (settings.creative.bokeh.enabled && settings.creative.bokeh.focus_auto)
+            || (settings.creative.mist.enabled && settings.creative.mist.protect_subject > 0.0))
+    {
         let mut s = settings.clone();
         s.subject_mask = scene.subject_refined();
         with_subject = s;
         &with_subject
+    } else {
+        settings
+    };
+    // Depth masks: the photo's depth map (found once per photo, kept with its scene). A render
+    // without a depth mask, Bokeh or Mist never runs the model.
+    let with_depth;
+    let settings = if settings.depth_map.is_none()
+        && (settings.gradients.iter().any(crate::gradient::needs_depth) || settings.creative.bokeh.enabled || settings.creative.mist.enabled || settings.creative.relight.enabled)
+    {
+        let mut s = settings.clone();
+        // On screen: only a depth already found (a slider never waits on a model run; the Creative
+        // effects show once `find_depth` has it). Exports and hand-offs find it here if need be.
+        s.depth_map = if DEPTH_KNOWN_ONLY.with(|c| c.get()) { scene.depth_field_known() } else { scene.depth_field() };
+        if s.depth_map.is_none() && DEPTH_KNOWN_ONLY.with(|c| c.get()) {
+            DEPTH_MISSING.with(|c| c.set(true));
+        }
+        with_depth = s;
+        &with_depth
+    } else {
+        settings
+    };
+    // Mist's airlight level, measured on the whole photo (a zoomed part and the export then match
+    // the preview).
+    let with_ambient;
+    let settings = if settings.creative.mist.enabled && settings.mist_ambient.is_none() {
+        let mut s = settings.clone();
+        s.mist_ambient = Some(s.depth_map.as_deref().map_or(0.18, |d| crate::mist::ambient(&scene.image, d)));
+        with_ambient = s;
+        &with_ambient
     } else {
         settings
     };
@@ -716,6 +803,142 @@ pub fn lens_search(query: String) -> Vec<(u32, String)> {
     crate::lensfun::search(&query, 40)
 }
 
+/// The last Creative result (key, picture): one photo at a time, so a few tens of MB at most.
+static CREATIVE_CACHE: std::sync::Mutex<Option<(u64, Arc<crate::pipeline::SceneImage>)>> = std::sync::Mutex::new(None);
+
+/// What the Creative result depends on: the picture coming in (every pixel, so any change before
+/// them counts: noise, lens, patches), their own settings, the depth and subject they use, and
+/// the exposure Bokeh's highlights read.
+fn creative_key(settings: &crate::pipeline::RenderSettings, image: &crate::pipeline::SceneImage, white: f32) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (image.width, image.height, image.source_long).hash(&mut h);
+    // FNV over the pixels' bits: fast enough per render (a few ms on a preview).
+    let mut f: u64 = 0xcbf2_9ce4_8422_2325;
+    for p in &image.px {
+        for v in p {
+            f ^= v.to_bits() as u64;
+            f = f.wrapping_mul(0x100_0000_01b3);
+        }
+    }
+    f.hash(&mut h);
+    serde_json::to_string(&settings.creative).unwrap_or_default().hash(&mut h);
+    settings.depth_map.as_ref().map(|d| Arc::as_ptr(d) as usize).hash(&mut h);
+    settings.subject_mask.as_ref().map(|m| Arc::as_ptr(m) as usize).hash(&mut h);
+    settings.exposure.to_bits().hash(&mut h);
+    settings.mist_ambient.map(f32::to_bits).hash(&mut h);
+    white.to_bits().hash(&mut h);
+    h.finish()
+}
+
+/// Relight, Mist and Bokeh on the scene light (None: none of them is on, or none had its depth),
+/// from the cache when nothing they depend on has changed. A part of the photo (zoomed in) is
+/// never cached (its frame changes as it pans).
+fn creative_cached(scene: &crate::develop::Scene, settings: &crate::pipeline::RenderSettings, image: &crate::pipeline::SceneImage) -> Option<Arc<crate::pipeline::SceneImage>> {
+    let c = &settings.creative;
+    if !(c.relight.enabled || c.mist.enabled || c.bokeh.enabled) {
+        return None;
+    }
+    // Light colours read against daylight (5500 K is white in the photo as it's shown), not the
+    // camera's as-shot setting: a beach shot on a tungsten preset (3000 K) made a golden sun blue.
+    let white = crate::pipeline::NEUTRAL_KELVIN;
+    let key = settings.region.is_none().then(|| creative_key(settings, image, white));
+    if let Some(k) = key {
+        if let Some((ck, img)) = CREATIVE_CACHE.lock().unwrap().as_ref() {
+            if *ck == k {
+                return Some(img.clone());
+            }
+        }
+    }
+    let out = creative_chain(scene, settings, image)?;
+    let out = Arc::new(out);
+    if let Some(k) = key {
+        *CREATIVE_CACHE.lock().unwrap() = Some((k, out.clone()));
+    }
+    Some(out)
+}
+
+/// Releases the kept Creative result (the RAW tab, or another photo): its memory back.
+pub fn forget_creative() {
+    *CREATIVE_CACHE.lock().unwrap() = None;
+}
+
+/// The Creative chain itself: Relight, then Mist, then Bokeh; None if none changed anything.
+fn creative_chain(scene: &crate::develop::Scene, settings: &crate::pipeline::RenderSettings, image: &crate::pipeline::SceneImage) -> Option<crate::pipeline::SceneImage> {
+    let original = image as *const crate::pipeline::SceneImage;
+    // Relight (Creative): virtual lights on the scene's own geometry, first of the Creative tools,
+    // so Mist's fog and Bokeh's blur work on the relit scene (as a real fog or lens would). Off:
+    // nothing at all, bit-identical.
+    let relight_image;
+    let image = if settings.creative.relight.enabled {
+        match settings.depth_map.as_deref().and_then(|depth| {
+            // Light colours read against daylight, as in `creative_cached`.
+            let white = crate::pipeline::NEUTRAL_KELVIN;
+            crate::relight::apply_balanced(image, depth, &settings.creative.relight, settings.region.as_ref().map(|r| &r.frame), white)
+        }) {
+            Some(out) => {
+                relight_image = out;
+                &relight_image
+            }
+            None => image,
+        }
+    } else {
+        image
+    };
+    // Mist (Creative): depth fog, height fog and glow on the scene light, before Bokeh so the fog
+    // is part of what Bokeh blurs. Off: nothing at all, bit-identical.
+    let mist_image;
+    let image = if settings.creative.mist.enabled {
+        match settings.depth_map.as_deref().and_then(|depth| {
+            crate::mist::apply(
+                image,
+                depth,
+                &settings.creative.mist,
+                if settings.creative.mist.protect_subject > 0.0 { settings.subject_mask.as_deref() } else { None },
+                settings.region.as_ref().map(|r| &r.frame),
+                settings.mist_ambient,
+            )
+        }) {
+            Some(out) => {
+                mist_image = out;
+                &mist_image
+            }
+            None => image,
+        }
+    } else {
+        image
+    };
+    // Bokeh (Creative): a whole-image pass on the scene light, before the tone curve, with the
+    // photo's own metric depth and its two surfaces at edges. Off: nothing at all, bit-identical.
+    let bokeh_image;
+    let image = if settings.creative.bokeh.enabled {
+        match settings.depth_map.as_deref().and_then(|depth| {
+            crate::bokeh::apply(
+                image,
+                depth,
+                &settings.creative.bokeh,
+                scene.lens.as_ref(),
+                if settings.creative.bokeh.focus_auto { settings.subject_mask.as_deref() } else { None },
+                settings.region.as_ref().map(|r| &r.frame),
+                settings.exposure,
+            )
+        }) {
+            Some(out) => {
+                bokeh_image = out;
+                &bokeh_image
+            }
+            None => image,
+        }
+    } else {
+        image
+    };
+    if std::ptr::eq(image, original) {
+        None
+    } else {
+        Some(image.clone())
+    }
+}
+
 fn render_image_tone(scene: &crate::develop::Scene, settings: &crate::pipeline::RenderSettings, sixteen: bool) -> image::DynamicImage {
     // AI noise reduction first (Noise, 0..100: how much of the cleaned
     // scene is used), so every other tool works on the cleaned picture.
@@ -766,6 +989,11 @@ fn render_image_tone(scene: &crate::develop::Scene, settings: &crate::pipeline::
         scene.lens.as_ref().and_then(|l| crate::lensprofile::correct_vignetting(source, l, settings.lens_vignette / 100.0))
     };
     let image = corrected.as_ref().unwrap_or(source);
+    // The Creative tools (Relight, Mist, Bokeh) on the scene light. Their result is kept for the
+    // last picture they were run on: while RAW's sliders move (tone, colour, detail come after
+    // them) they don't run again — paused until something they depend on changes.
+    let creative_out = creative_cached(scene, settings, image);
+    let image = creative_out.as_deref().unwrap_or(image);
     // A TIFF or JPEG is already toned: the "As is" profile, never a camera's or the user's.
     let as_is;
     let settings = if scene.display_referred {
@@ -1013,6 +1241,12 @@ pub async fn refresh_photo(path: String, settings: crate::pipeline::RenderSettin
         if let Some(m) = crate::diskcache::load_mask(photo) {
             let _ = scene.subject_mask.set(Some(Arc::new(m)));
         }
+        if let Some(d) = crate::diskcache::load_depth(photo) {
+            let _ = scene.depth_map.set(Some(Arc::new(d)));
+        }
+        if let Some(s) = crate::diskcache::load_scene(photo) {
+            let _ = scene.scene3d.set(Some(Arc::new(s)));
+        }
         let img = render_image(&scene, &settings);
         let thumb = preview::make_thumb_base64(&img, 1, THUMB_EDGE)?.0;
         Ok(RefreshedPhoto { preview: preview_of(path.clone(), &scene, &settings, &img, PREVIEW_JPEG_QUALITY)?, thumb })
@@ -1073,6 +1307,61 @@ fn subject_mask_of(scene: &crate::develop::Scene, path: &str) -> Option<Arc<crat
         .clone()
 }
 
+/// The photo's control depth refined against its scene, with the sky mask (and the scene itself,
+/// for metres): from the folder's cache if the scene hasn't got one yet (so a click just after
+/// the depth was found uses that rather than running the model again), else found now and refined.
+fn scene_refined_of(scene: &crate::develop::Scene, path: &str) -> Option<Arc<crate::scene::Refined>> {
+    let photo = Path::new(path);
+    if scene.scene_refined.get().is_none() {
+        if scene.scene3d.get().is_none() {
+            if let Some(s) = crate::diskcache::load_scene(photo) {
+                let _ = scene.scene3d.set(Some(Arc::new(s)));
+            }
+        }
+        if scene.depth_map.get().is_none() {
+            if let Some(map) = crate::diskcache::load_depth(photo) {
+                let _ = scene.depth_map.set(Some(Arc::new(map)));
+            }
+        }
+    }
+    let refined = scene.scene_refined();
+    // Made here rather than by `find_depth`: kept in the folder's cache too, so it isn't made again.
+    if let Some(s) = scene.scene3d.get().and_then(|s| s.as_ref()) {
+        if !crate::diskcache::has_depth(photo) {
+            let _ = crate::diskcache::save_depth(photo, &s.control_map());
+        }
+        if !crate::diskcache::has_scene(photo) {
+            let _ = crate::diskcache::save_scene(photo, s);
+        }
+    }
+    refined
+}
+
+/// The photo's control depth refined against its scene (`scene_refined_of`'s map), with the two
+/// surfaces at its edges.
+fn depth_of(scene: &crate::develop::Scene, path: &str) -> Option<Arc<crate::scene::Refined>> {
+    scene_refined_of(scene, path)
+}
+
+/// The photo's scene geometry: from the folder's cache if the scene hasn't got it yet, else found
+/// now (MoGe-2, else None and the depth map is Depth Anything's).
+fn scene_of(scene: &crate::develop::Scene, path: &str) -> Option<Arc<crate::scene::Scene3D>> {
+    let photo = Path::new(path);
+    if scene.scene3d.get().is_none() {
+        if let Some(s) = crate::diskcache::load_scene(photo) {
+            let _ = scene.scene3d.set(Some(Arc::new(s)));
+        }
+    }
+    let s = scene.scene3d();
+    if let Some(s) = &s {
+        if !crate::diskcache::has_scene(photo) {
+            let _ = crate::diskcache::save_scene(photo, s);
+            let _ = crate::diskcache::save_depth(photo, &s.control_map());
+        }
+    }
+    s
+}
+
 /// A mask (any kind, combined or not) to show over the photo while it's being set: red where
 /// it acts (as Lightroom's overlay), as a PNG data URL over the whole frame, 1024 pixels on
 /// its long side. The photo's subject mask is found for it if it needs one.
@@ -1089,7 +1378,8 @@ pub async fn mask_overlay(cache: tauri::State<'_, SceneCache>, path: String, mas
         };
         let (iw, ih) = (scene.image.width.max(1) as f32, scene.image.height.max(1) as f32);
         let aspect = iw / ih;
-        let shape = crate::gradient::MaskShape::new(&mask, aspect, subject.as_deref());
+        let depth = if crate::gradient::needs_depth(&mask) { depth_of(&scene, &path) } else { None };
+        let shape = crate::gradient::MaskShape::new(&mask, aspect, subject.as_deref(), depth.as_deref());
         let (w, h) = if aspect >= 1.0 { (1024u32, (1024.0 / aspect).round().max(1.0) as u32) } else { ((1024.0 * aspect).round().max(1.0) as u32, 1024u32) };
         let img = image::RgbaImage::from_fn(w, h, |x, y| {
             let m = shape.at((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32).clamp(0.0, 1.0);
@@ -1116,6 +1406,641 @@ pub async fn subject_snapshot(cache: tauri::State<'_, SceneCache>, path: String)
     .map_err(|e| e.to_string())?
 }
 
+/// Finds a photo's depth map ahead of time for its depth masks (a paste onto many photos, or a
+/// new depth layer), kept in the folder's cache: on a small develop of its own, so the photos
+/// being edited stay in the scene cache. Quick if it's found already (at the Depth quality the
+/// setting asks for: a photo whose scene was made at the other quality is made again).
+///
+/// The tiled detail pass (phase 1c §3) runs after this returns, on a background thread, and sends
+/// `depth-detail` with the photo's path when it lands, so the coarse map is what's shown first and
+/// the mask is updated when the windows have finished.
+#[tauri::command]
+pub async fn find_depth(app: tauri::AppHandle, cache: tauri::State<'_, SceneCache>, path: String) -> Result<bool, String> {
+    let handle = app.clone();
+    // The photo open on screen is in the scene cache already: its depth is found on that scene,
+    // so the 3D views and renders (which read the same scene) get this one run of the model
+    // instead of starting a second of their own beside it.
+    let open = cache.peek(&path);
+    // At background priority (it's work done ahead: a paste's photos).
+    tauri::async_runtime::spawn_blocking(move || background_pool().install(|| {
+        let photo = Path::new(&path);
+        let want = quality_name(crate::scene::quality());
+        let cached_quality = crate::diskcache::scene_quality(photo);
+        // A control depth cached already, at this quality, unless it's Depth Anything's fallback and
+        // the scene's own models are there now: then it's made again with them.
+        let up_to_date = crate::diskcache::has_depth(photo)
+            && !(crate::diskcache::depth_is_relative(photo) && crate::scene::available())
+            && cached_quality.as_deref() == Some(want);
+        if up_to_date {
+            detail_later(&handle, &path);
+            return Ok(true);
+        }
+        let t = std::time::Instant::now();
+        if let Some(open) = &open {
+            if let Some(s) = scene_of(open, &path) {
+                let _ = crate::diskcache::save_scene_quality(photo, quality_name(quality_of_model(s.model)));
+                detail_after(&handle, &path, t.elapsed());
+                return Ok(true);
+            }
+        }
+        let scene = crate::develop::develop_scene(photo, 1600)?;
+        // MoGe-2 when it's installed: its control depth, and the whole scene geometry beside it
+        // (with the High quality model's detail fitted to it, when that's the setting).
+        if let Some(s) = scene.scene3d() {
+            let _ = crate::diskcache::save_scene(photo, &s);
+            let _ = crate::diskcache::save_depth(photo, &s.control_map());
+            let _ = crate::diskcache::save_scene_quality(photo, quality_name(quality_of_model(s.model)));
+            detail_after(&handle, &path, t.elapsed());
+            return Ok(true);
+        }
+        // Else Depth Anything V2 Small's relative map (phase 1's fallback), as the control depth.
+        let made = match crate::depth::depth(&scene.image) {
+            Some(d) => {
+                let _ = crate::diskcache::save_depth_relative(photo, &d);
+                true
+            }
+            None => false,
+        };
+        if made {
+            detail_after(&handle, &path, t.elapsed());
+        }
+        Ok(made)
+    }))
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The Depth quality setting's name as the cache marker and the page use it.
+fn quality_name(q: crate::scene::Quality) -> &'static str {
+    match q {
+        crate::scene::Quality::High => "high",
+        crate::scene::Quality::Standard => "standard",
+    }
+}
+
+/// The quality a scene was made at, from its model's name (the High quality pass names itself).
+fn quality_of_model(model: &str) -> crate::scene::Quality {
+    if model.contains("DA3") {
+        crate::scene::Quality::High
+    } else {
+        crate::scene::Quality::Standard
+    }
+}
+
+/// Runs the tiled detail pass for a photo in the background after its scene is made: a third of
+/// the global pass's cost each, so the budget is three times it (the brief's cap).
+fn detail_after(app: &tauri::AppHandle, path: &str, global: std::time::Duration) {
+    let handle = app.clone();
+    let path = path.to_string();
+    let budget = global.saturating_mul(3).max(std::time::Duration::from_millis(600));
+    tauri::async_runtime::spawn_blocking(move || background_pool().install(|| detail_pass(&handle, &path, budget)));
+}
+
+/// The tiled pass for a photo whose scene is cached already (its global pass wasn't timed: a
+/// default budget).
+fn detail_later(app: &tauri::AppHandle, path: &str) {
+    let handle = app.clone();
+    let path = path.to_string();
+    tauri::async_runtime::spawn_blocking(move || background_pool().install(|| detail_pass(&handle, &path, std::time::Duration::from_secs(2))));
+}
+
+/// The tiled detail pass itself: the scene's own copy is loaded (so it isn't kept in the app's
+/// cache), the windows run at the model's own input size, and the result is saved with the scene
+/// and announced (`depth-detail`).
+fn detail_pass(app: &tauri::AppHandle, path: &str, budget: std::time::Duration) {
+    let photo = Path::new(path);
+    let Some(mut scene) = crate::diskcache::load_scene(photo) else { return };
+    if scene.detail.is_some() {
+        return;
+    }
+    let quality = quality_of_model(scene.model);
+    let Ok(developed) = crate::develop::develop_scene(photo, 1600) else { return };
+    let Some(detail) = crate::scene::detail(&developed.image, &scene, quality, budget) else { return };
+    scene.detail = Some(std::sync::Arc::new(detail));
+    if crate::diskcache::save_scene(photo, &scene).is_ok() {
+        let _ = app.emit("depth-detail", serde_json::json!({ "path": path }));
+    }
+}
+
+/// The Depth quality setting: Standard (MoGe-2 alone) or High (with Depth Anything 3 Mono-Large's
+/// detail fitted to its metric distance), and whether that model is here.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DepthQualityInfo {
+    /// `quality`: "standard" or "high" (the setting the engine is using now).
+    pub quality: &'static str,
+    /// Whether the High quality model is installed (a download finishes it).
+    pub hq_installed: bool,
+    /// Its download's size, for the offer ("656 MB").
+    pub hq_size: String,
+    pub hq_name: &'static str,
+    /// Whether the High quality model can run here at all (ONNX Runtime is there).
+    pub hq_available: bool,
+}
+
+#[tauri::command]
+pub async fn depth_quality() -> Result<DepthQualityInfo, String> {
+    Ok(DepthQualityInfo {
+        quality: quality_name(crate::scene::quality()),
+        hq_installed: crate::hq::installed().is_some(),
+        hq_size: crate::hq::size_text(),
+        hq_name: crate::hq::NAME,
+        // Building the session here would cost seconds; the model's file and ONNX Runtime are enough.
+        hq_available: crate::hq::installed().is_some() && crate::mask::ort_env().is_some(),
+    })
+}
+
+/// Sets the Depth quality setting (the page also keeps it in its own settings). Photos made at the
+/// other quality are made again the next time their depth is asked for.
+#[tauri::command]
+pub async fn set_depth_quality(quality: String) -> Result<(), String> {
+    crate::scene::set_quality(if quality == "high" { crate::scene::Quality::High } else { crate::scene::Quality::Standard });
+    Ok(())
+}
+
+/// Downloads the High quality depth model into the app's own models folder, resuming a part
+/// download and checking its SHA-256. Progress is sent as `depth-download` ({done, total}, bytes).
+#[tauri::command]
+pub async fn download_hq_depth(app: tauri::AppHandle) -> Result<bool, String> {
+    let dir = crate::mask::app_models_dir().ok_or("the app's models folder isn't known yet")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut sent = 0u64;
+        let mut progress = |done: u64, total: u64| {
+            // About 30 updates a second at most (a fast link sends a lot of 1 MB chunks).
+            if done == total || done - sent >= 8 << 20 {
+                sent = done;
+                let _ = app.emit("depth-download", serde_json::json!({ "done": done, "total": total }));
+            }
+        };
+        let path = crate::hq::download(&dir, &mut progress)?;
+        let _ = app.emit("depth-download", serde_json::json!({ "done": 1, "total": 1, "finished": true }));
+        Ok(path.is_file())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The photo's depth at (x, y), fractions of the upright, uncropped photo, from its refined
+/// control map, averaged over a small neighbourhood: the band's calibration (the depth bar's
+/// Pick). `metres` is the distance that control value stands for (MoGe-2's metric depth; null,
+/// Infinity in JSON, when there's no scene geometry or the point is sky). `sky` is 0..1.
+#[tauri::command]
+pub async fn depth_at(cache: tauri::State<'_, SceneCache>, path: String, x: f32, y: f32) -> Result<DepthAt, String> {
+    let scene = cache.get_or_develop(&path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let refined = scene_refined_of(&scene, &path).ok_or("no depth map for this photo")?;
+        let control = crate::depth::at_average(&refined.control, x, y);
+        let sky = refined.sky.as_ref().map_or(0.0, |s| crate::depth::at_average(s, x, y));
+        let metres = scene.scene3d().map_or(f32::NAN, |s| s.metres(control, sky));
+        Ok(DepthAt { control, metres, sky })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// A depth mask's Pick: the control value, the metres it stands for (null without a scene), and
+/// whether it's sky.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DepthAt {
+    /// 0..1, 1 = nearest, 0 = farthest (the depth bar's units).
+    pub control: f32,
+    /// Metres along the optical axis; null (JSON) for sky or without MoGe-2's scene.
+    pub metres: f32,
+    /// 0..1: 1 where MoGe-2 says there is no surface (sky).
+    pub sky: f32,
+}
+
+/// What the photo's scene knows about the camera and its distance range, for the depth bar's
+/// metre labels and the Depth Scope: the field of view (EXIF's 35 mm-equivalent focal length
+/// preferred when it has one, MoGe-2's own kept as a check), MoGe's focal length in pixels, the
+/// two anchors the control depth runs between, which model ran, and on what. Also the developed
+/// picture's own size and the lens's focal length and f-number, for the Depth Scope's readout.
+#[tauri::command]
+pub async fn scene_info(cache: tauri::State<'_, SceneCache>, path: String) -> Result<Option<SceneInfo>, String> {
+    let scene = cache.get_or_develop(&path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(s) = scene_of(&scene, &path) else {
+            return Ok(None);
+        };
+        let (width, height) = (scene.image.width.max(1), scene.image.height.max(1));
+        let aspect = width as f32 / height as f32;
+        let exif_35mm = focal_35mm(Path::new(&path));
+        let (focal_length_mm, f_number) = exif_lens(Path::new(&path));
+        let fov_exif_deg = exif_35mm.map(|f| fov_from_35mm(f, aspect));
+        Ok(Some(SceneInfo {
+            // EXIF's focal length is exact; MoGe's is a fit, so it's the check, not the value.
+            fov_x_deg: fov_exif_deg.unwrap_or(s.fov_x_deg),
+            fov_moge_deg: s.fov_x_deg,
+            fov_exif_deg,
+            focal_35mm: exif_35mm,
+            focal_px: s.focal_px * width as f32 / s.w.max(1) as f32,
+            focal_px_exif: fov_exif_deg.map(|deg| width as f32 * 0.5 / (deg.to_radians() * 0.5).tan()),
+            d_near: s.d_near,
+            d_far: s.d_far,
+            width,
+            height,
+            focal_length_mm,
+            f_number,
+            model: s.model,
+            ep: crate::scene::execution_provider(),
+        }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The photo's camera and distance facts (`scene_info`).
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SceneInfo {
+    /// The horizontal field of view, degrees: EXIF's when the photo has a 35 mm-equivalent focal
+    /// length, else MoGe-2's.
+    pub fov_x_deg: f32,
+    /// MoGe-2's own horizontal field of view (a fit; compare it with EXIF's).
+    pub fov_moge_deg: f32,
+    /// EXIF's, from the 35 mm-equivalent focal length, degrees.
+    pub fov_exif_deg: Option<f32>,
+    pub focal_35mm: Option<f32>,
+    /// The recovered focal length in pixels of the developed picture (MoGe's fit, the one the
+    /// point cloud and the metric depth were made with).
+    pub focal_px: f32,
+    /// EXIF's focal length in those pixels, when the photo has a 35 mm-equivalent one: the one to
+    /// trust for lens maths (Bokeh's CoC) when MoGe's fit disagrees.
+    pub focal_px_exif: Option<f32>,
+    /// The robust anchors the control depth runs between, metres.
+    pub d_near: f32,
+    pub d_far: f32,
+    /// The developed picture's size, which `focal_px` and the Depth Scope's field of view refer to.
+    pub width: usize,
+    pub height: usize,
+    /// EXIF's own focal length (mm) and f-number, when the photo has them (the Depth Scope's
+    /// readout; null in JSON when not).
+    pub focal_length_mm: Option<f32>,
+    pub f_number: Option<f32>,
+    pub model: &'static str,
+    pub ep: &'static str,
+}
+
+/// The lens facts the Bokeh panel shows: the shot's focal length, f-number, 35 mm-equivalent focal,
+/// sensor width, lens name and focus distance when EXIF has them, and the scene's own distance
+/// anchors (for the panel's metres). None when the photo names no lens at all.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BokehLens {
+    pub lens: Option<String>,
+    pub focal_mm: Option<f32>,
+    pub f_number: Option<f32>,
+    pub focal_35mm: Option<f32>,
+    pub sensor_width_mm: Option<f32>,
+    pub focus_distance_m: Option<f32>,
+    /// "exif" when the camera recorded a focus distance, "click" otherwise.
+    pub focus_source: &'static str,
+    pub d_near: Option<f32>,
+    pub d_far: Option<f32>,
+}
+
+#[tauri::command]
+pub async fn bokeh_lens(cache: tauri::State<'_, SceneCache>, path: String) -> Result<Option<BokehLens>, String> {
+    let scene = cache.get_or_develop(&path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let shot = scene.lens.as_ref();
+        let anchors = scene.scene3d().map(|s| (s.d_near, s.d_far));
+        let Some(shot) = shot else {
+            return Ok(anchors.map(|(n, f)| BokehLens {
+                lens: None,
+                focal_mm: None,
+                f_number: None,
+                focal_35mm: None,
+                sensor_width_mm: None,
+                focus_distance_m: None,
+                focus_source: "click",
+                d_near: Some(n),
+                d_far: Some(f),
+            }));
+        };
+        Ok(Some(BokehLens {
+            lens: (!shot.lens.is_empty()).then(|| shot.lens.clone()),
+            focal_mm: (shot.focal > 0.0).then_some(shot.focal),
+            f_number: (shot.fnumber > 0.0).then_some(shot.fnumber),
+            focal_35mm: shot.focal_35,
+            sensor_width_mm: shot.sensor_width_mm,
+            focus_distance_m: shot.focus_distance_m,
+            focus_source: if shot.focus_distance_m.is_some() { "exif" } else { "click" },
+            d_near: anchors.map(|a| a.0),
+            d_far: anchors.map(|a| a.1),
+        }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// A click-to-focus point on the photo as shown (fractions of its box, cropped or not): traced
+/// back to the upright, uncropped frame as the colour pickers are, with its control depth, metres
+/// and sky. The Bokeh panel stores the fractions and renders the blur from them.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BokehFocus {
+    pub u: f32,
+    pub v: f32,
+    pub control: f32,
+    pub metres: f32,
+    pub sky: f32,
+}
+
+#[tauri::command]
+pub async fn bokeh_focus(
+    cache: tauri::State<'_, SceneCache>,
+    path: String,
+    settings: Option<crate::pipeline::RenderSettings>,
+    x: f32,
+    y: f32,
+    auto: Option<bool>,
+) -> Result<BokehFocus, String> {
+    let scene = cache.get_or_develop(&path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        if !(0.0..=1.0).contains(&x) || !(0.0..=1.0).contains(&y) {
+            return Err("That's outside the photo".to_string());
+        }
+        let (w, h) = (scene.image.width.max(1), scene.image.height.max(1));
+        let settings = settings.unwrap_or_default();
+        let (sw, sh) = crate::zoom::shown_size(&settings.crop, w, h);
+        let (px, py) = crate::zoom::source_of(&settings, w, h)(x * sw, y * sh).ok_or("That's outside the photo")?;
+        let (u, v) = ((px / w as f32).clamp(0.0, 1.0), (py / h as f32).clamp(0.0, 1.0));
+        let refined = scene_refined_of(&scene, &path).ok_or("no depth map for this photo")?;
+        let control = if auto.unwrap_or(false) {
+            // The subject's own median distance (the panel's "Auto (subject)" line), when its
+            // matte is here or can be found.
+            let subject = scene.subject_refined();
+            crate::bokeh::focus_control(&refined, subject.as_deref(), &crate::creative::Bokeh { focus_auto: true, ..Default::default() })
+        } else {
+            crate::depth::at_average(&refined.control, u, v)
+        };
+        let sky = refined.sky.as_ref().map_or(0.0, |s| crate::depth::at_average(s, u, v));
+        let metres = scene.scene3d().map_or(f32::NAN, |s| s.metres(control, sky));
+        Ok(BokehFocus { u, v, control, metres, sky })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The f-number's own sharp zone (control depth, before Focus range) for a focus at control depth
+/// `focus`: what the Depth picture, the scope's planes and the drag tint show. None in Manual, or
+/// without metric depth.
+#[derive(serde::Serialize)]
+pub struct BokehZone {
+    pub near: f32,
+    pub far: f32,
+}
+
+#[tauri::command]
+pub async fn bokeh_zone(cache: tauri::State<'_, SceneCache>, path: String, bokeh: crate::creative::Bokeh, focus: f32) -> Result<Option<BokehZone>, String> {
+    let scene = cache.get_or_develop(&path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some((d_near, d_far)) = scene_refined_of(&scene, &path).and_then(|r| r.anchors) else {
+            return Ok(None);
+        };
+        let facts = crate::bokeh::LensFacts::from_shot(scene.lens.as_ref());
+        // As the render (`bokeh::apply`): the scene's metres scaled so the focus sits at EXIF's distance.
+        let focus_z = crate::scene::metres_of(focus.clamp(0.0, 1.0), d_near, d_far);
+        let scale = facts.exif_focus_m.map_or(1.0, |d| d / focus_z.max(1e-3));
+        let control = |m: f32| crate::scene::control_of(m / scale, d_near, d_far);
+        Ok(crate::bokeh::sharp_zone(&bokeh, &facts, focus_z * scale).map(|(lo, hi)| BokehZone { near: control(lo), far: control(hi) }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Where a point of the photo's own frame (fractions of the upright, uncropped picture, as the
+/// lights store it) lands on the photo as shown: the crop, straighten, keystone and quarter turns
+/// undone by inverting `zoom::source_of` numerically (a handful of Newton steps). One call moves a
+/// whole photo's worth of handles, so dragging them stays smooth.
+#[tauri::command]
+pub async fn frame_to_shown(cache: tauri::State<'_, SceneCache>, path: String, settings: crate::pipeline::RenderSettings, points: Vec<(f32, f32)>) -> Result<Vec<(f32, f32)>, String> {
+    let scene = cache.get_or_develop(&path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let (w, h) = (scene.image.width.max(1), scene.image.height.max(1));
+        let (sw, sh) = crate::zoom::shown_size(&settings.crop, w, h);
+        let to_source = crate::zoom::source_of(&settings, w, h);
+        let (wf, hf) = (w as f32, h as f32);
+        let mut out = Vec::with_capacity(points.len());
+        for (u, v) in points {
+            // The target in the photo's pixels, and a first guess: the shown photo's own fractions.
+            let (tx, ty) = (u * wf, v * hf);
+            let mut p = (u * sw, v * sh);
+            let mut ok = false;
+            for _ in 0..10 {
+                let Some((sx, sy)) = to_source(p.0, p.1) else { break };
+                let (ex, ey) = (sx - tx, sy - ty);
+                if ex.abs() < 0.2 && ey.abs() < 0.2 {
+                    ok = true;
+                    break;
+                }
+                // The Jacobian by finite differences, then one Newton step.
+                let (Some((ax, ay)), Some((bx, by))) = (to_source(p.0 + 1.0, p.1), to_source(p.0, p.1 + 1.0)) else { break };
+                let (a, b, c, d) = (ax - sx, ay - sy, bx - sx, by - sy);
+                let det = a * d - c * b;
+                if det.abs() < 1e-9 {
+                    break;
+                }
+                p = (p.0 - (d * ex - c * ey) / det, p.1 - (-b * ex + a * ey) / det);
+            }
+            // Outside the shown photo (a crop that cuts the light out): still reported, so the page
+            // can hide it rather than put it at an edge.
+            out.push(if ok || p.0.is_finite() && p.1.is_finite() { (p.0 / sw, p.1 / sh) } else { (f32::NAN, f32::NAN) });
+        }
+        Ok(out)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Match the light: a sun fitted to the photo's own shading (`relight::match_light`), so a second
+/// light can agree with the first, or replace it. None without normals or metric depth.
+#[tauri::command]
+pub async fn relight_match(cache: tauri::State<'_, SceneCache>, path: String) -> Result<Option<crate::creative::Light>, String> {
+    let scene = cache.get_or_develop(&path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(refined) = scene_refined_of(&scene, &path) else {
+            return Ok(None);
+        };
+        Ok(crate::relight::match_light(&scene.image, &refined))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The sharp band over the photo: the Depth Scope's own yellow (`src/scope/renderer.ts`).
+const FOCUS_YELLOW: image::Rgba<u8> = image::Rgba([255, 230, 0, 235]);
+
+/// The Depth picture under a Bokeh drag, in the Depth Scope's colours: the focus band yellow, the
+/// rest dimmed, as a translucent PNG data URL over the whole frame.
+#[tauri::command]
+pub async fn bokeh_tint(cache: tauri::State<'_, SceneCache>, path: String, near: f32, far: f32) -> Result<Option<String>, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let scene = cache.get_or_develop(&path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(field) = depth_of(&scene, &path) else {
+            return Ok(None);
+        };
+        let grid = field.control.clone();
+        let (iw, ih) = (scene.image.width.max(1) as f32, scene.image.height.max(1) as f32);
+        let aspect = iw / ih;
+        let (w, h) = if aspect >= 1.0 { (1024u32, (1024.0 / aspect).round().max(1.0) as u32) } else { ((1024.0 * aspect).round().max(1.0) as u32, 1024u32) };
+        let img = image::RgbaImage::from_fn(w, h, |x, y| {
+            let (fx, fy) = ((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32);
+            let d = grid.at(fx, fy).clamp(0.0, 1.0);
+            if d >= far && d <= near {
+                FOCUS_YELLOW
+            } else {
+                image::Rgba([0, 0, 0, 235])
+            }
+        });
+        let mut bytes = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png).map_err(|e| e.to_string())?;
+        Ok(Some(format!("data:image/png;base64,{}", STANDARD.encode(&bytes))))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The point on the photo nearest a control depth: the Depth Scope's focus plane dragged in 3D,
+/// which moves the picked focus point to a real pixel at that distance.
+#[tauri::command]
+pub async fn bokeh_focus_nearest(cache: tauri::State<'_, SceneCache>, path: String, control: f32) -> Result<BokehFocus, String> {
+    let scene = cache.get_or_develop(&path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let refined = scene_refined_of(&scene, &path).ok_or("no depth map for this photo")?;
+        let grid = &refined.control;
+        let target = control.clamp(0.0, 1.0);
+        let mut best = (f32::MAX, 0.5f32, 0.5f32, target);
+        // A coarse sweep is enough: the plane is a guide, and the depth changes smoothly.
+        let step = ((grid.w * grid.h) / 60_000).max(1);
+        for i in (0..grid.data.len()).step_by(step) {
+            let (u, v) = (((i % grid.w) as f32 + 0.5) / grid.w as f32, ((i / grid.w) as f32 + 0.5) / grid.h as f32);
+            let sky = refined.sky.as_ref().map_or(0.0, |s| s.at(u, v));
+            if sky > 0.5 {
+                continue;
+            }
+            let d = (grid.data[i] - target).abs();
+            if d < best.0 {
+                best = (d, u, v, grid.data[i]);
+            }
+        }
+        let (_, u, v, c) = best;
+        let sky = refined.sky.as_ref().map_or(0.0, |s| s.at(u, v));
+        let metres = scene.scene3d().map_or(f32::NAN, |s| s.metres(c, sky));
+        Ok(BokehFocus { u, v, control: c, metres, sky })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The photo's 35 mm-equivalent focal length (EXIF FocalLengthIn35mmFilm), if it has one.
+fn focal_35mm(photo: &Path) -> Option<f32> {
+    let f = std::fs::File::open(photo).ok()?;
+    let exif = exif::Reader::new().read_from_container(&mut std::io::BufReader::new(f)).ok()?;
+    exif.get_field(exif::Tag::FocalLengthIn35mmFilm, exif::In::PRIMARY)
+        .and_then(|f| f.value.get_uint(0))
+        .filter(|v| *v > 0)
+        .map(|v| v as f32)
+}
+
+/// The photo's own focal length (mm) and f-number: from the RAW's metadata (as Auto Style reads
+/// it), else the file's EXIF (a JPEG or TIFF). Either can be missing.
+fn exif_lens(photo: &Path) -> (Option<f32>, Option<f32>) {
+    let rat = |r: rawler::formats::tiff::Rational| (r.d > 0).then(|| r.n as f32 / r.d as f32);
+    let from_raw = rawler::rawsource::RawSource::new(photo).ok().and_then(|src| {
+        let dec = rawler::get_decoder(&src).ok()?;
+        let e = dec.raw_metadata(&src, &rawler::decoders::RawDecodeParams::default()).ok()?.exif;
+        Some((e.focal_length.and_then(rat), e.fnumber.and_then(rat)))
+    });
+    if let Some((focal, fnumber)) = from_raw {
+        if focal.is_some() || fnumber.is_some() {
+            return (focal, fnumber);
+        }
+    }
+    let f = std::fs::File::open(photo).ok();
+    let exif = f.and_then(|f| exif::Reader::new().read_from_container(&mut std::io::BufReader::new(f)).ok());
+    let Some(exif) = exif else {
+        return (None, None);
+    };
+    let rational = |tag| match exif.get_field(tag, exif::In::PRIMARY).map(|f| f.value.clone()) {
+        Some(exif::Value::Rational(r)) => r.first().map(|r| r.to_f32()).filter(|v| *v > 0.0),
+        _ => None,
+    };
+    (rational(exif::Tag::FocalLength), rational(exif::Tag::FNumber))
+}
+
+/// The horizontal field of view of a full-frame-equivalent focal length on a frame of this aspect
+/// ratio (35 mm equivalent is a diagonal measure: 43.27 mm across the diagonal of 36 x 24).
+fn fov_from_35mm(focal_35mm: f32, aspect: f32) -> f32 {
+    let half_diag = 21.633 / focal_35mm.max(1e-3);
+    let across = aspect / (aspect * aspect + 1.0).sqrt();
+    2.0 * (half_diag * across).atan().to_degrees()
+}
+
+/// The photo's scene as a point cloud for the Depth Scope: camera-space metres (x right, y down,
+/// z forward) and the picture's own colour, decimated to at most `max_points` (300k by default)
+/// evenly over the frame, sky left out. A compact binary, base64: "R1PT", a version (u16, 2), the
+/// point count (u32), then 13 bytes a point (x, y, z as half precision, r, g, b as bytes, and u, v
+/// as u16: the point's place in the upright, uncropped frame x 65535).
+#[tauri::command]
+pub async fn scene_points(cache: tauri::State<'_, SceneCache>, path: String, max_points: Option<usize>) -> Result<Option<String>, String> {
+    use base64::engine::general_purpose::STANDARD;
+    use base64::Engine;
+    let scene = cache.get_or_develop(&path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(s) = scene_of(&scene, &path) else {
+            return Ok(None);
+        };
+        let cloud = crate::scene::cloud(&s, &scene.image, max_points.unwrap_or(300_000));
+        Ok(Some(STANDARD.encode(&cloud.bytes)))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The photo's depth as a picture, warm where it's near and cool where it's far, as a PNG data
+/// URL over the whole frame, 1024 pixels on its long side (as `mask_overlay`): what to set a
+/// band by. With a depth mask, the part it acts on is shown yellow over it.
+#[tauri::command]
+pub async fn depth_overlay(cache: tauri::State<'_, SceneCache>, path: String, mask: Option<crate::gradient::Gradient>) -> Result<Option<String>, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let scene = cache.get_or_develop(&path)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(field) = depth_of(&scene, &path) else {
+            return Ok(None);
+        };
+        let grid = field.control.clone();
+        let (iw, ih) = (scene.image.width.max(1) as f32, scene.image.height.max(1) as f32);
+        let aspect = iw / ih;
+        let band = mask
+            .as_ref()
+            .filter(|m| m.kind == crate::gradient::Kind::Depth)
+            .map(|m| crate::gradient::MaskShape::new(m, aspect, None, Some(field.as_ref())));
+        let (w, h) = if aspect >= 1.0 { (1024u32, (1024.0 / aspect).round().max(1.0) as u32) } else { ((1024.0 * aspect).round().max(1.0) as u32, 1024u32) };
+        // Near: warm (a lit near colour); far: cool (blue), darkened so it reads as distance.
+        let (near, far) = ([255.0f32, 176.0, 96.0], [40.0f32, 74.0, 158.0]);
+        let img = image::RgbaImage::from_fn(w, h, |x, y| {
+            let (fx, fy) = ((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32);
+            let d = grid.at(fx, fy).clamp(0.0, 1.0);
+            let rgb: [f32; 3] = std::array::from_fn(|c| far[c] + (near[c] - far[c]) * d);
+            let in_band = band.as_ref().is_some_and(|b| b.at(fx, fy) >= 0.5);
+            if in_band {
+                FOCUS_YELLOW
+            } else {
+                image::Rgba([(rgb[0] * 0.72).round() as u8, (rgb[1] * 0.72).round() as u8, (rgb[2] * 0.72).round() as u8, 170])
+            }
+        });
+        let mut bytes = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png).map_err(|e| e.to_string())?;
+        Ok(Some(format!("data:image/png;base64,{}", STANDARD.encode(&bytes))))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 
 /// Re-renders a developed photo with the given settings - what the sliders
 /// call. Uses the cached scene, so it's fast after the first develop.
@@ -1135,13 +2060,14 @@ pub async fn render_preview(
     // not kept or measured.
     if interactive.unwrap_or(false) {
         let long = shown_long.map(|l| (l as usize).div_ceil(200) * 200).unwrap_or(usize::MAX);
+        load_known_depth(cache.get_or_develop(&path)?.as_ref(), &path);
         let small = cache.get_small(&path, long)?;
         // The last full render's Definition measures, while they hold what these settings need.
         let reuse = measured.latest_for(&path).filter(|m| m.covers(&settings));
         let settings = crate::pipeline::RenderSettings { reuse_measured: reuse, ..settings };
         #[cfg(debug_assertions)]
         let started = std::time::Instant::now();
-        let img = render_image(&small, &settings);
+        let (img, _) = on_screen(|| render_image(&small, &settings));
         let out = preview_of(path, &small, &settings, &img, DRAG_JPEG_QUALITY);
         // Dev builds: each drag frame's size and time (what the drag settles on, DragScale).
         #[cfg(debug_assertions)]
@@ -1150,16 +2076,19 @@ pub async fn render_preview(
     }
     let full = || {
         let scene = cache.get_or_develop(&path)?;
+        load_known_depth(&scene, &path);
         // What the whole photo measures, kept for zoomed-in detail with these settings.
         let key = crate::zoom::settings_key(&path, &settings);
         let slot = Arc::new(std::sync::Mutex::new(None));
         let measuring = crate::pipeline::RenderSettings { measure_into: Some(slot.clone()), ..settings.clone() };
-        let preview = render_scene(path.clone(), &scene, &measuring)?;
+        let (preview, lacked_depth) = on_screen(|| render_scene(path.clone(), &scene, &measuring));
+        let preview = preview?;
         if let Some(m) = slot.lock().unwrap().take() {
             measured.put(key, m);
         }
-        // Kept in the folder's cache, so reopening the shoot shows it at once.
-        if let Some(key) = &cache_key {
+        // Kept in the folder's cache, so reopening the shoot shows it at once (not a render that
+        // went without its depth: the finished one follows when the depth is found).
+        if let (Some(key), false) = (&cache_key, lacked_depth) {
             let _ = crate::diskcache::save_preview(Path::new(&preview.path), key, &preview);
         }
         Ok(preview)
@@ -1190,6 +2119,7 @@ pub async fn render_detail(
     interactive: Option<bool>,
 ) -> Result<String, String> {
     let preview = cache.get_or_develop(&path)?;
+    load_known_depth(&preview, &path);
     // The whole photo's measures with these settings: from its preview render,
     // or measured now. While a slider moves (`interactive`), the photo's newest
     // measures stand in, so nothing waits on a whole-photo render.
@@ -1202,7 +2132,7 @@ pub async fn render_detail(
         None => {
             let slot = Arc::new(std::sync::Mutex::new(None));
             let measuring = crate::pipeline::RenderSettings { measure_into: Some(slot.clone()), ..settings.clone() };
-            let _ = render_image(&preview, &measuring);
+            let _ = on_screen(|| render_image(&preview, &measuring));
             let m = slot.lock().unwrap().take().unwrap_or_default();
             measured.put(key, m);
             measured.get(&crate::zoom::settings_key(&path, &settings)).unwrap_or_default()
@@ -1524,6 +2454,8 @@ pub struct RemovalModes {
     pub medium: bool,
     pub lite: bool,
     pub mode: crate::removal::Mode,
+    /// GPU (Smarter) is on the graphics card: the Remove bar offers "GPU OFF".
+    pub gpu_loaded: bool,
 }
 
 /// The Render setting (Auto / GPU / CPU), the GPU found and why a render last stayed on the CPU.
@@ -1545,7 +2477,7 @@ pub fn set_render_mode(mode: crate::gpu::RenderMode) -> crate::gpu::Status {
 #[tauri::command]
 pub fn removal_modes() -> RemovalModes {
     let (large, medium, lite) = crate::removal::installed();
-    RemovalModes { large, medium, lite, mode: crate::removal::mode() }
+    RemovalModes { large, medium, lite, mode: crate::removal::mode(), gpu_loaded: crate::gpumax::loaded() }
 }
 
 /// The Remove bar's Large / Medium / Lite switch.
@@ -1612,6 +2544,38 @@ pub fn can_find_objects() -> bool {
 #[tauri::command]
 pub fn removal_hold(open: bool) {
     crate::klein::hold(open);
+    if crate::removal::rorem_enabled() {
+        crate::rorem::hold(open, crate::removal::mode() == crate::removal::Mode::Medium);
+    }
+}
+
+/// GPU (Smarter)'s model download progress, in bytes; `checking` while a finished file's
+/// checksum is worked out.
+#[derive(serde::Serialize, Clone)]
+pub struct RemoverDownload {
+    pub done: u64,
+    pub total: u64,
+    pub checking: bool,
+}
+
+/// Downloads GPU (Smarter)'s model (Klein, ~4.35 GB; `remover_download.rs`) into the app's own
+/// models folder, sending "gpu-remover-download" progress events. Err("cancelled") if stopped.
+#[tauri::command]
+pub async fn download_gpu_remover(app: tauri::AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::remover_download::download(crate::remover_download::current(), |done, total, phase| {
+            let checking = phase == crate::remover_download::Phase::Checking;
+            let _ = app.emit("gpu-remover-download", RemoverDownload { done, total, checking });
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Stops GPU (Smarter)'s model download (it carries on from there next time).
+#[tauri::command]
+pub fn cancel_gpu_remover_download() {
+    crate::remover_download::cancel();
 }
 
 /// Remove opened on this photo: SAM 3 analyses it in the background.

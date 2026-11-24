@@ -51,6 +51,27 @@ const LEVEL_AGREE_SHARE: f32 = 0.6;
 /// to 34.6 deg: the keystone fit's rotation, extrapolated from three short lines 10 deg and more
 /// apart (a sleeve, a door edge), far outside the leans it was fitted to.
 const MAX_LEVEL_DEG: f32 = 10.0;
+/// Horizontals (Level's fallback when there are too few verticals) asking for a turn past
+/// `LEVEL_GENTLE_DEG` must agree more closely than verticals: indoors they are mostly tables, banners and shelves seen at an angle, whose
+/// perspective spreads them by a few degrees, where a real horizon is one straight line. On 14 Nov
+/// a bar's "Happy Birthday" banner and table edges (-4.6, -3.2, -1.2 deg) turned a straight group
+/// shot (P1336868) by +4.1 deg.
+const LEVEL_AGREE_HORIZONTAL_DEG: f32 = 1.2;
+/// Turns up to this are left to the plain rules (`LEVEL_AGREE_DEG`, lines on one side allowed):
+/// the stricter checks are only for the large turns that went wrong, so the many decent small
+/// ones stay as they were (on the 326-photo Deborah Slater set, 9 results change, 145 -> 139 turned).
+const LEVEL_GENTLE_DEG: f32 = 3.0;
+/// Verticals away from the middle lean by perspective as well as by rotation (a camera tilted down
+/// at a table makes the left side's verticals lean one way and the right side's the other), so
+/// agreeing verticals count only when they sit on both sides of the photo, or near its middle
+/// (within this fraction of the width either side), where perspective barely leans them. On 15 Nov
+/// three bottle and bucket edges, all on the left, turned a straight table shot (P1346998) by
+/// +7.4 deg, where the keystone fit of the same lines gave +0.7.
+const LEVEL_CENTRE_FRACTION: f32 = 0.1;
+/// ...but only for turns larger than this: perspective on one side shows as a big lean, and smaller
+/// one-sided turns were mostly fine, so they are kept as before (6 deg: P1346998 asked 7.4, a
+/// threshold of 3 also dropped good 3.5 deg turns on a pillar, P1347067/P1347070).
+const LEVEL_ONE_SIDED_MAX_DEG: f32 = 6.0;
 
 
 #[derive(serde::Serialize, Clone, Debug)]
@@ -250,12 +271,12 @@ fn weighted_median_lean(lines: &[Line]) -> f32 {
 /// Level's lean (degrees, the lines' own: dx per dy, or dy per dx for horizontals) when the lines
 /// agree (`LEVEL_AGREE_DEG`, `LEVEL_AGREE_SHARE`), and how many lines agreed: their length-weighted
 /// mean. Two agreeing lines at least, or one long one (`min_single`, analysis pixels).
-fn consensus(lines: &[Line], min_single: f32) -> Option<(f32, usize)> {
+fn consensus(lines: &[Line], min_single: f32, agree_deg: f32) -> Option<(f32, usize)> {
     if lines.is_empty() {
         return None;
     }
     let median = weighted_median_lean(lines).atan().to_degrees();
-    let agree: Vec<&Line> = lines.iter().filter(|l| (l.lean.atan().to_degrees() - median).abs() <= LEVEL_AGREE_DEG).collect();
+    let agree: Vec<&Line> = lines.iter().filter(|l| (l.lean.atan().to_degrees() - median).abs() <= agree_deg).collect();
     let total: f32 = lines.iter().map(|l| l.votes).sum();
     let agreed: f32 = agree.iter().map(|l| l.votes).sum();
     let enough = agree.len() >= 2 || agree.first().is_some_and(|l| l.votes >= min_single);
@@ -266,6 +287,46 @@ fn consensus(lines: &[Line], min_single: f32) -> Option<(f32, usize)> {
     Some((mean, agree.len()))
 }
 
+/// The verticals' consensus; a turn past `LEVEL_ONE_SIDED_MAX_DEG` only when perspective can't be
+/// what they agree on: the agreeing lines sit on both sides of the middle, or mostly near it
+/// (`LEVEL_CENTRE_FRACTION`).
+fn vertical_consensus(verticals: &[Line], w: u32, h: u32) -> Option<(f32, usize)> {
+    let (deg, n) = consensus(verticals, 0.6 * h as f32, LEVEL_AGREE_DEG)?;
+    if deg.abs() <= LEVEL_ONE_SIDED_MAX_DEG {
+        return Some((deg, n));
+    }
+    let band = LEVEL_CENTRE_FRACTION * w as f32;
+    // The same lines `consensus` agreed on (within `LEVEL_AGREE_DEG` of the weighted median).
+    let median = weighted_median_lean(verticals).atan().to_degrees();
+    let agree = verticals.iter().filter(|l| (l.lean.atan().to_degrees() - median).abs() <= LEVEL_AGREE_DEG);
+    let (mut left, mut right, mut centre) = (0.0f32, 0.0f32, 0.0f32);
+    for l in agree {
+        if l.offset < -band {
+            left += l.votes;
+        } else if l.offset > band {
+            right += l.votes;
+        } else {
+            centre += l.votes;
+        }
+    }
+    let both_sides = left > 0.0 && right > 0.0;
+    let mostly_centre = centre >= 0.5 * (left + right + centre);
+    (both_sides || mostly_centre).then_some((deg, n))
+}
+
+/// The horizontals' consensus as a clockwise turn (past `LEVEL_GENTLE_DEG`, closer agreement than
+/// verticals: `LEVEL_AGREE_HORIZONTAL_DEG`). A horizontal with dy/dx = s > 0 runs downhill to the right, i.e.
+/// the photo is turned clockwise, so turning back is negative. One alone counts if it runs across
+/// half the photo's width.
+fn horizon_level(horizontals: &[Line], w: u32) -> Option<(f32, usize)> {
+    let min_single = 0.5 * w as f32;
+    let (d, n) = consensus(horizontals, min_single, LEVEL_AGREE_DEG)?;
+    if d.abs() <= LEVEL_GENTLE_DEG {
+        return Some((-d, n));
+    }
+    consensus(horizontals, min_single, LEVEL_AGREE_HORIZONTAL_DEG).map(|(d, n)| (-d, n))
+}
+
 /// Level's turn (clockwise degrees) and the lines it's based on: the verticals' when they agree;
 /// the horizontals' (a horizon) only when there are fewer than three verticals, as before 11 Nov
 /// (indoors, "horizontals" are mostly tables and floors running into the picture: 23 Oct); (0, 0)
@@ -274,10 +335,8 @@ fn consensus(lines: &[Line], min_single: f32) -> Option<(f32, usize)> {
 fn level_of(verticals: &[Line], horizontals: &[Line], w: u32, h: u32) -> (f32, usize) {
     let within = |t: &(f32, usize)| t.0.abs() <= MAX_LEVEL_DEG;
     // One vertical alone counts if it runs most of the photo's height; one horizontal, half its width.
-    let from_v = consensus(verticals, 0.6 * h as f32).filter(within);
-    // A horizontal with dy/dx = s > 0 runs downhill to the right, i.e. the photo is turned
-    // clockwise, so turning back is negative.
-    let from_h = consensus(horizontals, 0.5 * w as f32).map(|(d, n)| (-d, n)).filter(within);
+    let from_v = vertical_consensus(verticals, w, h).filter(within);
+    let from_h = horizon_level(horizontals, w).filter(within);
     if verticals.len() >= 3 {
         return from_v.unwrap_or((0.0, 0));
     }
@@ -316,7 +375,7 @@ pub fn analyse(img: &DynamicImage, focal_ratio: f32) -> AutoTransform {
 
     // Not enough verticals: level on the horizontals instead, if there are two or more, or one that
     // runs across half the photo (a real horizon). One short one alone is too easily a table edge or
-    // a step, and the photo is better left as it is.
+    // a step, and the photo is better left as it is. (Keystone's own turn; Level's is `level_of`.)
     let trusted = horizontals.len() >= 2 || horizontals.first().is_some_and(|l| l.votes >= 0.5 * w as f32);
     if let Some(h_deg) = from_horizontals.filter(|_| trusted) {
         return AutoTransform { rotate_deg: h_deg, rotate_level_deg: level_deg, vertical_tilt_deg: None, line_count: horizontals.len(), level_line_count: level_lines };
@@ -435,6 +494,39 @@ mod tests {
         // P1336733 (was -0.5, fine): still levelled about the same.
         let (d, _) = level_of(&lines(&[(-0.86, 211.0), (-1.15, 102.0), (0.0, 158.0), (-1.72, 102.0)]), &lines(&[(12.13, 132.0)]), w, h);
         assert!((d + 0.7).abs() < 0.3, "{d}");
+    }
+
+    /// Lines with where they sit: (lean degrees, offset px from the middle, run px).
+    fn placed(lines: &[(f32, f32, f32)]) -> Vec<Line> {
+        lines.iter().map(|&(d, offset, run)| Line { lean: d.to_radians().tan(), offset, votes: run }).collect()
+    }
+
+    #[test]
+    fn level_leaves_one_sided_and_spread_lines_alone() {
+        let (w, h) = (1000, 667);
+        // P1346998 (15 Nov, was +7.4): three agreeing verticals, all on the left (bottles and an ice
+        // bucket leaning by perspective), no horizontals: left alone.
+        let v = placed(&[(7.97, -337.0, 110.0), (6.28, -357.0, 101.0), (-4.86, 297.0, 91.0), (7.97, -415.0, 89.0), (-13.50, -149.0, 84.0)]);
+        assert_eq!(level_of(&v, &[], w, h), (0.0, 0));
+        // P1336868 (14 Nov, was +4.1): no verticals, three horizontals spread over 3.4 deg (a
+        // banner and table edges): left alone by Level.
+        let hz = placed(&[(-1.15, -206.0, 173.0), (-4.57, -310.0, 504.0), (-3.15, -270.0, 236.0)]);
+        assert_eq!(level_of(&[], &hz, w, h), (0.0, 0));
+        assert_eq!(horizon_level(&hz, w), None);
+        // A turned room: verticals on both sides agree on -7 deg: levelled.
+        let (d, n) = level_of(&placed(&[(-7.1, -350.0, 150.0), (-6.9, 320.0, 140.0), (-7.0, -200.0, 100.0)]), &[], w, h);
+        assert!((d + 7.0).abs() < 0.2 && n == 3, "{d} {n}");
+        // The same lean on one side only: left alone.
+        assert_eq!(level_of(&placed(&[(-7.1, -350.0, 150.0), (-6.9, -320.0, 140.0), (-7.0, -200.0, 100.0)]), &[], w, h), (0.0, 0));
+        // A smaller one-sided turn (under 6 deg) is kept, as before.
+        let (d, n) = level_of(&placed(&[(-2.0, -380.0, 150.0), (-1.8, -300.0, 120.0), (9.0, 350.0, 90.0)]), &[], w, h);
+        assert!((d + 1.9).abs() < 0.2 && n == 2, "{d} {n}");
+        // Small horizontal turns keep the 2 deg agreement: two lines 1.6 deg apart still level by ~-1.
+        let (d, n) = level_of(&[], &placed(&[(0.2, -100.0, 300.0), (1.8, 100.0, 250.0)]), w, h);
+        assert!((d + 0.93).abs() < 0.2 && n == 2, "{d} {n}");
+        // Agreeing verticals near the middle (a door frame behind the subject): levelled.
+        let (d, n) = level_of(&placed(&[(7.5, -60.0, 200.0), (7.3, 40.0, 150.0), (-6.0, 380.0, 90.0)]), &[], w, h);
+        assert!((d - 7.4).abs() < 0.2 && n == 2, "{d} {n}");
     }
 
     #[test]

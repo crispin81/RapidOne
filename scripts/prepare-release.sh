@@ -16,8 +16,9 @@ target="${1:-$(rustc -vV | sed -n 's/^host: //p')}"
 
 # Every model the installer carries (never autostyle-*.json: trained styles are personal).
 missing=0
-for f in birefnet-lite.onnx denoise-student.onnx grounding-dino-tiny-int8.onnx grounding-dino-tokenizer.json \
-         lama_fp32.onnx mobile_sam_image_encoder.onnx sam_mask_decoder_multi.onnx MODELS-LICENCES.txt; do
+for f in birefnet-lite.onnx denoise-student.onnx depth-anything-v2-small.onnx moge-2-vits-normal.onnx moge-2-vitb-normal.onnx \
+         grounding-dino-tiny-int8.onnx grounding-dino-tokenizer.json lama_fp32.onnx mobile_sam_image_encoder.onnx \
+         sam_mask_decoder_multi.onnx MODELS-LICENCES.txt NOTICE-DINOv2.txt; do
   [ -f "models/$f" ] || { echo "missing models/$f (npm run fetch-models)" >&2; missing=1; }
 done
 [ "$missing" = 0 ] || exit 1
@@ -63,6 +64,19 @@ if [[ "$target" == *windows-msvc ]]; then
   [ -n "$dml" ] || { echo "DirectML.dll not found in ort's cache ($ort_cache): run a cargo build first" >&2; exit 1; }
   cp "$dml" src-tauri/windows-lib/
   echo "DirectML from $dml"
+fi
+
+# Apple Silicon: ONNX Runtime's WebGPU library (libwebgpu_dawn.dylib; depth, Creative and GPU (Smarter) run
+# on WebGPU there) goes in the app's Contents/Frameworks (tauri.release.conf.json, macOS.frameworks), where
+# the program looks for it (build.rs rpath). Without it the app doesn't start. ort keeps it in its cache
+# beside the ONNX Runtime it links in.
+if [[ "$target" == aarch64-apple-darwin ]]; then
+  dawn="$(ls -t "$HOME/Library/Caches/ort.pyke.io/dfbin/$target"/*/libwebgpu_dawn.dylib 2>/dev/null | head -1 || true)"
+  [ -n "$dawn" ] || { echo "libwebgpu_dawn.dylib not found in ort's cache: run a cargo build first" >&2; exit 1; }
+  rm -rf src-tauri/mac-lib
+  mkdir -p src-tauri/mac-lib
+  cp "$dawn" src-tauri/mac-lib/
+  echo "WebGPU (Dawn) from $dawn"
 fi
 
 echo "Release files staged for $target (RapidRetouch engine from $module)."

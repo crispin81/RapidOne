@@ -49,7 +49,8 @@ const PARTS: Part[] = [
         items: [
           { name: "BiRefNet (lite)", licence: "MIT", does: "The Subject mask, the subject-aware vignette, and keeping people out of removals", url: "https://github.com/ZhengPeng7/BiRefNet" },
           { name: "SCUNet", licence: "Apache-2.0", does: "AI noise reduction (and the small model trained from it)", url: "https://github.com/cszn/SCUNet" },
-          { name: "LaMa", licence: "Apache-2.0", does: "Fills in what Remove Lite takes away", url: "https://github.com/advimman/lama" },
+          { name: "LaMa", licence: "Apache-2.0", does: "Fills in what Remove (CPU) takes away", url: "https://github.com/advimman/lama" },
+          { name: "RORem (optional download)", licence: "Apache-2.0 code; weights CreativeML OpenRAIL++-M (from Stable Diffusion XL), converted to ONNX by RapidOne", does: "Fills in what Remove (GPU) takes away, on the graphics card", url: "https://github.com/leeruibin/RORem" },
           { name: "MobileSAM", licence: "MIT", does: "Outlines the object in a box drawn for Remove", url: "https://github.com/ChaoningZhang/MobileSAM" },
           { name: "Grounding DINO (tiny)", licence: "Apache-2.0", does: "Finds objects by name for Remove (\"sign\", \"bin\")", url: "https://github.com/IDEA-Research/GroundingDINO" },
         ],
